@@ -6,10 +6,6 @@
   <strong>Historical context for coding agents, attached to the files they explore.</strong><br>
 </p>
 
-<p align="center">
-  <sub>Local-first · Exact paths · Progressive context · No embeddings</sub>
-</p>
-
 Madeleine is a local-first memory layer for coding agents. When an agent reads
 or edits a file, it surfaces the past agent sessions that changed that exact
 file—and the decisions that shaped it.
