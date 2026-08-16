@@ -1,12 +1,9 @@
 <p align="center">
-  <img src="./assets/madeleine-logo.png" alt="Madeleine pixel-art logo" width="240">
+  <img src="./assets/madeleine-logo.png" alt="Madeleine" width="760">
 </p>
 
-<h1 align="center">Madeleine</h1>
-
 <p align="center">
-  <strong>The codebase remembers.</strong><br>
-  Historical context for coding agents, attached to the files they explore.
+  <strong>Historical context for coding agents, attached to the files they explore.</strong><br>
 </p>
 
 <p align="center">
