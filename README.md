@@ -8,7 +8,7 @@
 
 Madeleine is a local-first memory layer for coding agents. When an agent reads
 or edits a file, it surfaces the past agent sessions that changed that exact
-file—and the decisions that shaped it.
+file and the decisions that shaped it.
 
 The agent already selects relevant context by navigating the repository.
 Madeleine adds history to what it is looking at instead of turning memory into
