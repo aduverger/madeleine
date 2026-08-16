@@ -76,6 +76,7 @@ History is disclosed in layers:
 
 The default lookup is intentionally deterministic: the five newest Episodes for
 the exact path, newest first. The model decides which history matters.
+More elaborated ranking mechanisms will be explored in the future.
 
 ## How an Episode is created
 
@@ -127,9 +128,7 @@ The MVP does **not** include:
 - a daemon, web service, or user interface;
 - Agent Trace or Git AI interoperability.
 
-These are not rejected forever. They are deferred until the exact-path model is
-dogfooded and measured. File-level history is the product thesis; richer
-machinery should earn its complexity.
+These are not rejected forever. We want to focus first on validating file-level history.
 
 ## Architecture
 
@@ -144,8 +143,7 @@ Madeleine Go library and CLI
 SQLite is the sole source of truth for the MVP. Its write pattern is small,
 append-oriented, and friendly to concurrent readers. If future same-machine
 contention is measured, a single-writer broker can be added. Shared multi-machine
-operation would use a server store such as PostgreSQL rather than stretching an
-embedded database into a distributed system.
+operation would use a server store such as PostgreSQL.
 
 ## Direction after the MVP
 
