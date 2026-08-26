@@ -81,7 +81,8 @@ func repositoryWorkingDirectory(path string) (string, error) {
 }
 
 func canonicalGitPath(workingDirectory string, output []byte) (string, error) {
-	value := strings.TrimSpace(string(output))
+	value := strings.TrimSuffix(string(output), "\n")
+	value = strings.TrimSuffix(value, "\r")
 	if value == "" {
 		return "", errors.New("Git returned an empty path")
 	}

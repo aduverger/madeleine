@@ -81,6 +81,28 @@ func TestResolveRepositoryNormalAndNoOrigin(t *testing.T) {
 	}
 }
 
+func TestResolveRepositoryPreservesTrailingSpace(t *testing.T) {
+	t.Parallel()
+
+	root := filepath.Join(t.TempDir(), "repository ")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "init")
+
+	repository, err := ResolveRepository(context.Background(), root)
+	if err != nil {
+		t.Fatalf("ResolveRepository: %v", err)
+	}
+	wantRoot := canonicalTestPath(t, root)
+	if repository.WorktreeRoot != wantRoot {
+		t.Fatalf("worktree root = %q, want %q", repository.WorktreeRoot, wantRoot)
+	}
+	if repository.GitCommonDir != filepath.Join(wantRoot, ".git") {
+		t.Fatalf("common dir = %q, want %q", repository.GitCommonDir, filepath.Join(wantRoot, ".git"))
+	}
+}
+
 func TestResolveRepositoryOrigin(t *testing.T) {
 	t.Parallel()
 
