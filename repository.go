@@ -3,7 +3,6 @@ package madeleine
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
 	"net/url"
 	"os"
@@ -150,7 +149,7 @@ func normalizeOrigin(raw string) (string, error) {
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return "", errors.New("repository origin URL is invalid")
 	}
-	host := strings.ToLower(parsed.Hostname())
+	host := parsed.Hostname()
 	if host == "" {
 		return "", errors.New("repository origin host is empty")
 	}
@@ -174,5 +173,5 @@ func normalizedHostPath(host, repositoryPath string) (string, error) {
 	if strings.IndexFunc(host+repositoryPath, unicode.IsControl) >= 0 {
 		return "", errors.New("repository origin contains a control character")
 	}
-	return fmt.Sprintf("%s/%s", host, repositoryPath), nil
+	return host + "/" + repositoryPath, nil
 }

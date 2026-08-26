@@ -19,7 +19,7 @@ const (
 
 var (
 	urlCredentials = regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*://)[^/@\s]+@`)
-	urlQuery       = regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*://[^?\s'\"]+)\?[^\s'\"]+`)
+	urlQuery       = regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*://[^?\s'"]+)\?[^\s'"]+`)
 	secretValue    = regexp.MustCompile(`(?i)\b(password|passwd|token|secret|api[_-]?key)=([^\s]+)`)
 )
 
@@ -82,7 +82,7 @@ func Run(ctx context.Context, executable, workingDirectory string, args []string
 		return nil, &CommandError{
 			Operation:  sanitizeOperation(args[0]),
 			ExitStatus: exitStatus,
-			Stderr:     sanitizeStderr(stderr.Bytes(), stderr.truncated),
+			Stderr:     sanitizeStderr(stderr.buffer.Bytes(), stderr.truncated),
 			Err:        cause,
 		}
 	}
@@ -112,18 +112,14 @@ func (b *limitedBuffer) Write(data []byte) (int, error) {
 	return originalLength, nil
 }
 
-func (b *limitedBuffer) Bytes() []byte {
-	return b.buffer.Bytes()
-}
-
 func sanitizeOperation(operation string) string {
+	if operation == "" {
+		return "command"
+	}
 	for _, value := range operation {
 		if !(unicode.IsLetter(value) || unicode.IsDigit(value) || value == '-') {
 			return "command"
 		}
-	}
-	if operation == "" {
-		return "command"
 	}
 	return operation
 }

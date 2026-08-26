@@ -9,7 +9,7 @@ import (
 func TestPublicContractsAreImportable(t *testing.T) {
 	t.Parallel()
 
-	requests := []any{
+	_ = []any{
 		madeleine.StartCaptureRequest{},
 		madeleine.RecordWriteRequest{},
 		madeleine.PendingCaptureQuery{},
@@ -17,16 +17,11 @@ func TestPublicContractsAreImportable(t *testing.T) {
 		madeleine.PublishEpisodeRequest{},
 		madeleine.ContextRequest{},
 		madeleine.EpisodeRequest{},
-	}
-	results := []any{
 		madeleine.Repository{},
 		madeleine.Capture{},
 		madeleine.FinalizationDraft{},
 		madeleine.Episode{},
 		madeleine.FileContext{},
 		madeleine.EpisodeDetail{},
-	}
-	if len(requests) != 7 || len(results) != 6 {
-		t.Fatal("public contract declarations are incomplete")
 	}
 }

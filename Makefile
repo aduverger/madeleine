@@ -1,7 +1,7 @@
 .PHONY: fmt-check test vet build check
 
 fmt-check:
-	@test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
+	@files="$$(gofmt -l .)"; test -z "$$files" || { printf '%s\n' "$$files"; exit 1; }
 
 test:
 	go test ./...
