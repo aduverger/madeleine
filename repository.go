@@ -146,7 +146,13 @@ func normalizeOrigin(raw string) (string, error) {
 	}
 
 	parsed, err := url.Parse(trimmed)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+	if err != nil {
+		return "", errors.New("repository origin URL is invalid")
+	}
+	if strings.EqualFold(parsed.Scheme, "file") {
+		return "", errUnsupportedOrigin
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
 		return "", errors.New("repository origin URL is invalid")
 	}
 	host := parsed.Hostname()

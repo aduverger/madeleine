@@ -36,7 +36,7 @@ i=0
 while [ "$i" -lt 5000 ]; do printf x >&2; i=$((i + 1)); done
 exit 23
 `)
-	_, err := Run(context.Background(), executable, t.TempDir(), []string{"fetch"}, time.Second)
+	_, err := Run(context.Background(), executable, t.TempDir(), []string{"fetch"}, 5*time.Second)
 	if err == nil {
 		t.Fatal("Run error = nil, want command error")
 	}
@@ -76,6 +76,23 @@ while :; do :; done
 	}
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("timeout took %s", elapsed)
+	}
+}
+
+func TestRunTimeoutClosesInheritedPipes(t *testing.T) {
+	t.Parallel()
+
+	executable := writeExecutable(t, `#!/bin/sh
+(sleep 2) &
+while :; do :; done
+`)
+	started := time.Now()
+	_, err := Run(context.Background(), executable, t.TempDir(), []string{"status"}, 30*time.Millisecond)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error = %v, want context deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("timeout with inherited pipes took %s", elapsed)
 	}
 }
 

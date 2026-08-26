@@ -15,6 +15,7 @@ import (
 const (
 	DiscoveryTimeout = 5 * time.Second
 	MaxStderrBytes   = 4096
+	commandWaitDelay = 100 * time.Millisecond
 )
 
 var (
@@ -64,6 +65,7 @@ func Run(ctx context.Context, executable, workingDirectory string, args []string
 
 	command := exec.CommandContext(commandContext, executable, args...)
 	command.Dir = workingDirectory
+	command.WaitDelay = commandWaitDelay
 	var stdout bytes.Buffer
 	stderr := &limitedBuffer{limit: MaxStderrBytes}
 	command.Stdout = &stdout

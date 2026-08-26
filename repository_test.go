@@ -97,19 +97,29 @@ func TestResolveRepositoryOrigin(t *testing.T) {
 	}
 }
 
-func TestResolveRepositoryLocalOriginIsOptional(t *testing.T) {
+func TestResolveRepositoryLocalOriginsAreOptional(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	git(t, root, "init")
-	git(t, root, "remote", "add", "origin", "../local/repo.git")
-
-	repository, err := ResolveRepository(context.Background(), root)
-	if err != nil {
-		t.Fatalf("ResolveRepository: %v", err)
+	origins := []string{
+		"../local/repo.git",
+		"file:///absolute/path/repo.git",
+		"file://localhost/absolute/path/repo.git",
 	}
-	if repository.Origin != "" {
-		t.Fatalf("origin = %q, want empty", repository.Origin)
+	for _, origin := range origins {
+		t.Run(origin, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			git(t, root, "init")
+			git(t, root, "remote", "add", "origin", origin)
+
+			repository, err := ResolveRepository(context.Background(), root)
+			if err != nil {
+				t.Fatalf("ResolveRepository: %v", err)
+			}
+			if repository.Origin != "" {
+				t.Fatalf("origin = %q, want empty", repository.Origin)
+			}
+		})
 	}
 }
 

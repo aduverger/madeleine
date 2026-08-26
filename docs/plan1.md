@@ -179,10 +179,9 @@ https://github.com/aduverger/madeleine.git
   empty string. Optional timestamps and `PendingCaptureQuery.ConversationKey`
   use pointers. Result structs include the fields required by Plans 2-10, but
   no Store behavior is introduced here.
-- Origins that are neither URL-like nor SCP-like, such as local filesystem
-  remotes, are treated as having no normalized origin alias. This keeps valid
-  local Git repositories resolvable without inventing a cross-machine origin
-  identity.
+- Non-network origins, including local paths and `file://` URLs, have no
+  normalized origin alias. This keeps valid local Git repositories resolvable
+  without inventing a cross-machine origin identity.
 - UUIDv7 generation uses `github.com/google/uuid`; public fields remain the
   opaque Madeleine string types.
 - Public timestamps remain `time.Time`. Plan 2's Store owns timestamp creation
