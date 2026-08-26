@@ -2,13 +2,22 @@
 
 PR scope: one PR  
 Depends on: `plan7.md`  
-Design decisions: D-004, D-005, D-006, D-007, D-011, D-014, D-016
+Design decisions: D-004, D-005, D-006, D-007, D-011, D-014, D-016, D-021
 
 ## Goal
 
 Connect Pi lifecycle and successful mutation events to Live Captures. Preserve
 one Capture across `/reload`, create new Captures for distinct runs, and expose
 operational status/abandon commands. Episode summarization starts in Plan 9.
+
+## Entire reuse gate
+
+- [ ] Inspect the relevant `entireio/cli` implementation and tests before
+  coding this PR.
+- [ ] Prefer copying or adapting compatible mechanics to reimplementation;
+  Madeleine's interfaces and invariants remain authoritative.
+- [ ] Record reused upstream paths and commit, and retain required attribution.
+- [ ] If equivalent code is not reused, record the concrete mismatch in the PR.
 
 ## Files
 

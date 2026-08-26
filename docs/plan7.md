@@ -2,13 +2,22 @@
 
 PR scope: one PR  
 Depends on: `plan6.md`  
-Design decisions: D-001, D-003, D-011, D-012, D-016, D-017, D-020
+Design decisions: D-001, D-003, D-011, D-012, D-016, D-017, D-020, D-021
 
 ## Goal
 
 Ship the read-only half of the Pi reference adapter: detect the Go binary,
 query exact-path History after successful reads, append safe L1 context, and
 expose explicit L2 Episode retrieval. Capture lifecycle begins in Plan 8.
+
+## Entire reuse gate
+
+- [ ] Inspect the relevant `entireio/cli` implementation and tests before
+  coding this PR.
+- [ ] Prefer copying or adapting compatible mechanics to reimplementation;
+  Madeleine's interfaces and invariants remain authoritative.
+- [ ] Record reused upstream paths and commit, and retain required attribution.
+- [ ] If equivalent code is not reused, record the concrete mismatch in the PR.
 
 ## Files
 

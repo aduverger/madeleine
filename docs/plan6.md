@@ -2,13 +2,22 @@
 
 PR scope: one PR  
 Depends on: `plan5.md`  
-Design decisions: D-010, D-016, D-020
+Design decisions: D-010, D-016, D-020, D-021
 
 ## Goal
 
 Expose the Go library to non-Go harnesses through a stable one-request-per-
 process protocol. The CLI must be script-safe: stdout contains only the response
 object, stderr contains diagnostics, and operation failures use nonzero status.
+
+## Entire reuse gate
+
+- [ ] Inspect the relevant `entireio/cli` implementation and tests before
+  coding this PR.
+- [ ] Prefer copying or adapting compatible mechanics to reimplementation;
+  Madeleine's interfaces and invariants remain authoritative.
+- [ ] Record reused upstream paths and commit, and retain required attribution.
+- [ ] If equivalent code is not reused, record the concrete mismatch in the PR.
 
 ## Files
 

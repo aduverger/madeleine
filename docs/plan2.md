@@ -2,13 +2,22 @@
 
 PR scope: one PR  
 Depends on: `plan1.md`  
-Design decisions: D-005, D-008, D-010, D-016, D-019, D-020
+Design decisions: D-005, D-008, D-010, D-016, D-019, D-020, D-021
 
 ## Goal
 
 Implement local SQLite lifecycle, migrations, data-directory policy, and the
 canonical persistence of Repositories, aliases, and Conversations. No Capture or
 Episode tables are added yet.
+
+## Entire reuse gate
+
+- [ ] Inspect the relevant `entireio/cli` implementation and tests before
+  coding this PR.
+- [ ] Prefer copying or adapting compatible mechanics to reimplementation;
+  Madeleine's interfaces and invariants remain authoritative.
+- [ ] Record reused upstream paths and commit, and retain required attribution.
+- [ ] If equivalent code is not reused, record the concrete mismatch in the PR.
 
 ## Files
 

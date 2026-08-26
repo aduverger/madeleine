@@ -48,6 +48,34 @@ existing view of current code and Git history.
    a summarization model must never break the harness's normal tools.
 8. **Optimize from evidence.** SQLite and direct process invocation remain until
    benchmarks show a real bottleneck.
+9. **Reuse before rebuilding.** Entire is the primary implementation reference.
+   Before writing a mechanic it already solves, inspect its code and tests and
+   reuse or adapt them when they fit Madeleine's semantics and dependency
+   budget.
+
+## Implementation posture: reuse Entire
+
+Madeleine owns a smaller product model than
+[Entire](https://github.com/entireio/cli), but that does not make its
+implementation greenfield. Entire's open-source Go codebase contains proven
+work around agent lifecycles, Git integration, session capture, recovery, and
+cross-platform CLI behavior. Reusing that work is preferred to independently
+reimplementing the same mechanics.
+
+Every implementation PR must:
+
+1. inspect the relevant Entire implementation and tests before coding;
+2. copy or adapt compatible code when it preserves Madeleine's accepted
+   semantics and keeps the dependency surface small;
+3. record the upstream repository path and commit used, and retain attribution
+   or notices required by the upstream license;
+4. document why reuse was rejected when equivalent Entire code was inspected
+   but did not fit.
+
+Madeleine's domain model, public API, and invariants remain authoritative. Reuse
+the smallest coherent implementation rather than importing unrelated Entire
+architecture. Fresh code is valid when the semantics differ, but it should be a
+deliberate conclusion after inspection, not the default starting point.
 
 ## Domain model
 
@@ -478,11 +506,16 @@ additive layers later.
 They recreate the global retrieval problem that Madeleine is designed to avoid.
 The model already signals relevance by opening code.
 
-### Depending on SessionWiki, Entire, OpenTraces, or Git AI
+### Adopting SessionWiki, Entire, OpenTraces, or Git AI wholesale
 
 These projects are useful research and implementation references. None matches
 the deliberately small local path-context kernel, and adopting one would inherit
 unrelated architecture and maintenance risk. Madeleine owns its core.
+
+This rejects an upstream project as Madeleine's foundation; it does not reject
+code reuse. Entire in particular is the preferred source for proven mechanics.
+Compatible implementations and tests should be adapted under their applicable
+license instead of rewritten merely to keep the repository independent.
 
 ### Canonical JSON plus rebuildable SQLite
 
@@ -533,11 +566,13 @@ reference boundary.
 | D-018 | Agent Trace is future interoperability only. | Deferred | Internal persistence is not shaped around an external attribution RFC. |
 | D-019 | Optimize only after concurrency benchmarks. | Locked | A broker/Postgres is a measured evolution, not MVP scaffolding. |
 | D-020 | Support macOS and Linux first. | Locked | CGo-free SQLite keeps later Windows support feasible. |
+| D-021 | Inspect Entire and reuse compatible code before rebuilding equivalent mechanics. | Locked | Each PR records reused provenance or why reuse did not fit; Madeleine's semantics remain authoritative. |
 
 ## Reference documentation
 
 - [Go module dependency management](https://go.dev/doc/modules/managing-dependencies)
 - [Go toolchain selection](https://go.dev/doc/toolchain)
 - [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite)
+- [Entire CLI source](https://github.com/entireio/cli)
 - [Pi extension API](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md)
 - [Pi package format](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md)

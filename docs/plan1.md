@@ -2,13 +2,22 @@
 
 PR scope: one PR  
 Depends on: nothing  
-Design decisions: D-001, D-002, D-010, D-016, D-020
+Design decisions: D-001, D-002, D-010, D-016, D-020, D-021
 
 ## Goal
 
 Establish the Go module, contributor checks, domain vocabulary, and authoritative
 Git/path resolution used by every later PR. This PR does not open a database or
 ship a functional CLI.
+
+## Entire reuse gate
+
+- [ ] Inspect the relevant `entireio/cli` implementation and tests before
+  coding this PR.
+- [ ] Prefer copying or adapting compatible mechanics to reimplementation;
+  Madeleine's interfaces and invariants remain authoritative.
+- [ ] Record reused upstream paths and commit, and retain required attribution.
+- [ ] If equivalent code is not reused, record the concrete mismatch in the PR.
 
 ## Files and packages
 

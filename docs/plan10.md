@@ -2,13 +2,22 @@
 
 PR scope: one PR  
 Depends on: `plan9.md`  
-Design decisions: D-006, D-014, D-015, D-016, D-019, D-020
+Design decisions: D-006, D-014, D-015, D-016, D-019, D-020, D-021
 
 ## Goal
 
 Finish the Pi MVP by recovering interrupted Captures without delaying or
 contaminating the new run, validating the real Go/SQLite/Git/TypeScript vertical
 slice, and documenting installation and operations.
+
+## Entire reuse gate
+
+- [ ] Inspect the relevant `entireio/cli` implementation and tests before
+  coding this PR.
+- [ ] Prefer copying or adapting compatible mechanics to reimplementation;
+  Madeleine's interfaces and invariants remain authoritative.
+- [ ] Record reused upstream paths and commit, and retain required attribution.
+- [ ] If equivalent code is not reused, record the concrete mismatch in the PR.
 
 ## Files
 

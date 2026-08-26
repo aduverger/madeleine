@@ -2,13 +2,22 @@
 
 PR scope: one PR  
 Depends on: `plan3.md`  
-Design decisions: D-001, D-002, D-003, D-004, D-005, D-012
+Design decisions: D-001, D-002, D-003, D-004, D-005, D-012, D-021
 
 ## Goal
 
 Turn a sealed Capture into immutable History and implement the two core read
 questions: "which Episodes changed this path?" and "what is the full L2 for this
 Episode?"
+
+## Entire reuse gate
+
+- [ ] Inspect the relevant `entireio/cli` implementation and tests before
+  coding this PR.
+- [ ] Prefer copying or adapting compatible mechanics to reimplementation;
+  Madeleine's interfaces and invariants remain authoritative.
+- [ ] Record reused upstream paths and commit, and retain required attribution.
+- [ ] If equivalent code is not reused, record the concrete mismatch in the PR.
 
 ## Files
 

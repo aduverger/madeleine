@@ -2,13 +2,22 @@
 
 PR scope: one PR  
 Depends on: `plan8.md`  
-Design decisions: D-003, D-006, D-013, D-016, D-017
+Design decisions: D-003, D-006, D-013, D-016, D-017, D-021
 
 ## Goal
 
 Complete the clean-run pipeline: seal a Capture, project its bounded Pi
 transcript, generate validated L1/L2 with the active model, and publish an
 immutable Episode. Any failure must leave `pending_summary` recoverable.
+
+## Entire reuse gate
+
+- [ ] Inspect the relevant `entireio/cli` implementation and tests before
+  coding this PR.
+- [ ] Prefer copying or adapting compatible mechanics to reimplementation;
+  Madeleine's interfaces and invariants remain authoritative.
+- [ ] Record reused upstream paths and commit, and retain required attribution.
+- [ ] If equivalent code is not reused, record the concrete mismatch in the PR.
 
 ## Files
 

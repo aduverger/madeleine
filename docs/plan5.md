@@ -2,13 +2,22 @@
 
 PR scope: one PR  
 Depends on: `plan4.md`  
-Design decisions: D-002, D-007, D-009, D-016
+Design decisions: D-002, D-007, D-009, D-016, D-021
 
 ## Goal
 
 Make Capture final paths authoritative enough for real agent work by combining
 structured Pi write evidence with non-mutating Git reconciliation. Preserve
 dirty-at-start state correctly and never alter the user's repository.
+
+## Entire reuse gate
+
+- [ ] Inspect the relevant `entireio/cli` implementation and tests before
+  coding this PR.
+- [ ] Prefer copying or adapting compatible mechanics to reimplementation;
+  Madeleine's interfaces and invariants remain authoritative.
+- [ ] Record reused upstream paths and commit, and retain required attribution.
+- [ ] If equivalent code is not reused, record the concrete mismatch in the PR.
 
 ## Files
 

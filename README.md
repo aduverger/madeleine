@@ -117,6 +117,18 @@ It will provide:
 The Go binary and Pi package will be installed separately. No daemon or network
 service is required.
 
+## Reuse before rebuilding
+
+Madeleine is deliberately small, but it is not built in isolation. The
+[Entire CLI](https://github.com/entireio/cli) is the primary implementation
+reference for mechanics it has already solved, including agent lifecycles, Git
+integration, session capture, recovery, and cross-platform behavior.
+
+When Entire code or tests fit Madeleine's semantics, we prefer adapting them to
+writing another implementation. Madeleine still owns its smaller domain model
+and avoids importing unrelated architecture. Reused work keeps its required
+attribution and provenance.
+
 ## Deliberate non-goals
 
 The MVP does **not** include:

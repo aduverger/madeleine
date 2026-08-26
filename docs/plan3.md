@@ -2,13 +2,22 @@
 
 PR scope: one PR  
 Depends on: `plan2.md`  
-Design decisions: D-004, D-005, D-007, D-008, D-016
+Design decisions: D-004, D-005, D-007, D-008, D-016, D-021
 
 ## Goal
 
 Persist unfinished work directly in SQLite and implement the complete Capture
 state machine. Until Plan 5, sealing uses only structured paths recorded through
 `RecordWrite`; that temporary limitation must be explicit in tests.
+
+## Entire reuse gate
+
+- [ ] Inspect the relevant `entireio/cli` implementation and tests before
+  coding this PR.
+- [ ] Prefer copying or adapting compatible mechanics to reimplementation;
+  Madeleine's interfaces and invariants remain authoritative.
+- [ ] Record reused upstream paths and commit, and retain required attribution.
+- [ ] If equivalent code is not reused, record the concrete mismatch in the PR.
 
 ## Files
 
