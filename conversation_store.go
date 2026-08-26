@@ -42,10 +42,7 @@ func (s *Store) getOrCreateConversation(
 		}
 		conversationID = newID
 		createdAt := utcTimestamp()
-		var storedTranscriptRef any
-		if transcriptRef != "" {
-			storedTranscriptRef = transcriptRef
-		}
+		storedTranscriptRef := sql.NullString{String: transcriptRef, Valid: transcriptRef != ""}
 		_, err = transaction.ExecContext(ctx, `
 			INSERT INTO conversations(
 				id, repository_id, harness, external_id, transcript_ref, created_at, updated_at

@@ -40,7 +40,6 @@ func Open(ctx context.Context, options Options) (*Store, error) {
 	if err != nil {
 		return nil, wrapError("open store", home, err)
 	}
-	store := &Store{db: db}
 	if err := enableWAL(ctx, db); err != nil {
 		_ = db.Close()
 		return nil, wrapError("enable store WAL", home, err)
@@ -53,7 +52,7 @@ func Open(ctx context.Context, options Options) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return store, nil
+	return &Store{db: db}, nil
 }
 
 func (s *Store) Close() error {
@@ -123,7 +122,7 @@ func enableWAL(ctx context.Context, db *sql.DB) error {
 			}
 			return nil
 		}
-		if !isSQLiteBusy(err) {
+		if !isSQLiteContention(err) {
 			return err
 		}
 		select {
@@ -134,7 +133,7 @@ func enableWAL(ctx context.Context, db *sql.DB) error {
 	}
 }
 
-func isSQLiteBusy(err error) bool {
+func isSQLiteContention(err error) bool {
 	var sqliteError interface{ Code() int }
 	if !errors.As(err, &sqliteError) {
 		return false

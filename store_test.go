@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -46,7 +45,6 @@ func TestOpenMigratesAndReopensStore(t *testing.T) {
 	}
 
 	reopened := openTestStore(t, home)
-	defer reopened.Close()
 	var reappliedAt string
 	if err := reopened.db.QueryRow("SELECT applied_at FROM schema_migrations WHERE version = 1").Scan(&reappliedAt); err != nil {
 		t.Fatalf("read reopened migration: %v", err)
@@ -163,11 +161,8 @@ func TestConcurrentOpenAppliesFirstMigrationOnce(t *testing.T) {
 	home := t.TempDir()
 	start := make(chan struct{})
 	errorsByStore := make(chan error, 2)
-	var wait sync.WaitGroup
 	for range 2 {
-		wait.Add(1)
 		go func() {
-			defer wait.Done()
 			<-start
 			store, err := Open(context.Background(), Options{Home: home})
 			if err == nil {
@@ -177,10 +172,8 @@ func TestConcurrentOpenAppliesFirstMigrationOnce(t *testing.T) {
 		}()
 	}
 	close(start)
-	wait.Wait()
-	close(errorsByStore)
-	for err := range errorsByStore {
-		if err != nil {
+	for range 2 {
+		if err := <-errorsByStore; err != nil {
 			t.Fatalf("concurrent Open: %v", err)
 		}
 	}
