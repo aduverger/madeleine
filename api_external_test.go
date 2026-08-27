@@ -29,4 +29,10 @@ func TestPublicContractsAreImportable(t *testing.T) {
 	}
 	var _ func(context.Context, madeleine.Options) (*madeleine.Store, error) = madeleine.Open
 	var _ func(*madeleine.Store, context.Context, string) (madeleine.Repository, error) = (*madeleine.Store).ResolveRepository
+	var _ func(*madeleine.Store, context.Context, madeleine.StartCaptureRequest) (madeleine.Capture, error) = (*madeleine.Store).StartCapture
+	var _ func(*madeleine.Store, context.Context, madeleine.CaptureID) (madeleine.Capture, error) = (*madeleine.Store).GetCapture
+	var _ func(*madeleine.Store, context.Context, madeleine.RecordWriteRequest) error = (*madeleine.Store).RecordWrite
+	var _ func(*madeleine.Store, context.Context, madeleine.PendingCaptureQuery) ([]madeleine.Capture, error) = (*madeleine.Store).ListPendingCaptures
+	var _ func(*madeleine.Store, context.Context, madeleine.SealCaptureRequest) (madeleine.FinalizationDraft, error) = (*madeleine.Store).SealCapture
+	var _ func(*madeleine.Store, context.Context, madeleine.CaptureID) error = (*madeleine.Store).AbandonCapture
 }

@@ -53,12 +53,14 @@ func TestOpenMigratesAndReopensStore(t *testing.T) {
 		t.Fatalf("migration timestamp changed from %q to %q", appliedAt, reappliedAt)
 	}
 
-	for _, table := range []string{"repositories", "repository_aliases", "conversations"} {
+	for _, table := range []string{
+		"repositories", "repository_aliases", "conversations", "captures", "capture_paths",
+	} {
 		if !databaseObjectExists(t, reopened.db, "table", table) {
 			t.Errorf("table %q does not exist", table)
 		}
 	}
-	for _, excluded := range []string{"captures", "episodes", "transcripts"} {
+	for _, excluded := range []string{"episodes", "transcripts"} {
 		if databaseObjectExists(t, reopened.db, "table", excluded) {
 			t.Errorf("excluded table %q exists", excluded)
 		}
@@ -76,8 +78,8 @@ func TestOpenMigratesAndReopensStore(t *testing.T) {
 	if err := fresh.db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&freshMigrationCount); err != nil {
 		t.Fatal(err)
 	}
-	if freshMigrationCount != 1 {
-		t.Fatalf("fresh migration count = %d, want 1", freshMigrationCount)
+	if freshMigrationCount != 2 {
+		t.Fatalf("fresh migration count = %d, want 2", freshMigrationCount)
 	}
 }
 
@@ -240,7 +242,7 @@ func TestOpenRejectsFutureMigrationVersion(t *testing.T) {
 	store := openTestStore(t, home)
 	if _, err := store.db.Exec(
 		"INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
-		2, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		3, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Close(); err != nil {
