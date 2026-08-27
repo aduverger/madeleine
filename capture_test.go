@@ -265,7 +265,7 @@ func TestConcurrentRecordWriteIsIdempotent(t *testing.T) {
 		}()
 	}
 	close(start)
-	for range cap(errorsByWrite) {
+	for range len(stores) * 2 {
 		if err := <-errorsByWrite; err != nil {
 			t.Fatalf("RecordWrite: %v", err)
 		}
@@ -655,7 +655,7 @@ func startCaptureWithKey(t *testing.T, store *Store, root string, key Conversati
 	capture, err := store.StartCapture(context.Background(), StartCaptureRequest{
 		RepositoryRoot:  root,
 		ConversationKey: key,
-		TranscriptRef:   string(key.ExternalID) + ".jsonl",
+		TranscriptRef:   key.ExternalID + ".jsonl",
 		StartCursor:     "start",
 	})
 	if err != nil {

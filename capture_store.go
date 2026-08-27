@@ -145,19 +145,17 @@ func (s *Store) ListPendingCaptures(ctx context.Context, query PendingCaptureQue
 	}
 
 	statement := captureSelect + `
-		WHERE c.repository_id = ? AND c.status IN (?, ?)
-		ORDER BY c.started_at, c.id`
+		WHERE c.repository_id = ? AND c.status IN (?, ?)`
 	arguments := []any{repository.ID, CaptureStatusOpen, CaptureStatusPendingSummary}
 	if query.ConversationKey != nil {
 		if query.ConversationKey.Harness == "" || query.ConversationKey.ExternalID == "" {
 			return nil, wrapError("list pending captures", query.ConversationKey.ExternalID, ErrInvalidState)
 		}
-		statement = captureSelect + `
-			WHERE c.repository_id = ? AND c.status IN (?, ?)
-				AND conversation.harness = ? AND conversation.external_id = ?
-			ORDER BY c.started_at, c.id`
+		statement += `
+			AND conversation.harness = ? AND conversation.external_id = ?`
 		arguments = append(arguments, query.ConversationKey.Harness, query.ConversationKey.ExternalID)
 	}
+	statement += " ORDER BY c.started_at, c.id"
 
 	rows, err := s.db.QueryContext(ctx, statement, arguments...)
 	if err != nil {
