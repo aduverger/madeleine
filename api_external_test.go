@@ -24,6 +24,7 @@ func TestPublicContractsAreImportable(t *testing.T) {
 		madeleine.Capture{},
 		madeleine.FinalizationDraft{},
 		madeleine.Episode{},
+		madeleine.EpisodeSummary{},
 		madeleine.FileContext{},
 		madeleine.EpisodeDetail{},
 	}
@@ -34,5 +35,8 @@ func TestPublicContractsAreImportable(t *testing.T) {
 	var _ func(*madeleine.Store, context.Context, madeleine.RecordWriteRequest) error = (*madeleine.Store).RecordWrite
 	var _ func(*madeleine.Store, context.Context, madeleine.PendingCaptureQuery) ([]madeleine.Capture, error) = (*madeleine.Store).ListPendingCaptures
 	var _ func(*madeleine.Store, context.Context, madeleine.SealCaptureRequest) (madeleine.FinalizationDraft, error) = (*madeleine.Store).SealCapture
+	var _ func(*madeleine.Store, context.Context, madeleine.PublishEpisodeRequest) (madeleine.Episode, error) = (*madeleine.Store).PublishEpisode
 	var _ func(*madeleine.Store, context.Context, madeleine.CaptureID) error = (*madeleine.Store).AbandonCapture
+	var _ func(*madeleine.Store, context.Context, madeleine.ContextRequest) ([]madeleine.FileContext, error) = (*madeleine.Store).ContextForPaths
+	var _ func(*madeleine.Store, context.Context, madeleine.EpisodeRequest) (madeleine.EpisodeDetail, error) = (*madeleine.Store).GetEpisode
 }
