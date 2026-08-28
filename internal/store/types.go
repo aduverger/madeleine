@@ -1,6 +1,10 @@
-package madeleine
+package store
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type RepositoryID string
 type ConversationID string
@@ -141,4 +145,32 @@ type EpisodeDetail struct {
 	EndCursor       string          `json:"end_cursor"`
 	StartedAt       time.Time       `json:"started_at"`
 	EndedAt         time.Time       `json:"ended_at"`
+}
+
+func newRepositoryID() (RepositoryID, error) {
+	id, err := newUUIDv7()
+	return RepositoryID(id), err
+}
+
+func newConversationID() (ConversationID, error) {
+	id, err := newUUIDv7()
+	return ConversationID(id), err
+}
+
+func newCaptureID() (CaptureID, error) {
+	id, err := newUUIDv7()
+	return CaptureID(id), err
+}
+
+func newEpisodeID() (EpisodeID, error) {
+	id, err := newUUIDv7()
+	return EpisodeID(id), err
+}
+
+func newUUIDv7() (string, error) {
+	id, err := uuid.NewV7()
+	if err != nil {
+		return "", err
+	}
+	return id.String(), nil
 }

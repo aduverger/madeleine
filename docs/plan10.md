@@ -1,14 +1,14 @@
-# Plan 10: Crash recovery, end-to-end hardening, and Pi MVP
+# Plan 10: Pi summary generation and clean publication
 
 PR scope: one PR  
 Depends on: `plan9.md`  
-Design decisions: D-006, D-014, D-015, D-016, D-019, D-020, D-021
+Design decisions: D-003, D-006, D-013, D-016, D-017, D-021
 
 ## Goal
 
-Finish the Pi MVP by recovering interrupted Captures without delaying or
-contaminating the new run, validating the real Go/SQLite/Git/TypeScript vertical
-slice, and documenting installation and operations.
+Complete the clean-run pipeline: seal a Capture, project its bounded Pi
+transcript, generate validated L1/L2 with the active model, and publish an
+immutable Episode. Any failure must leave `pending_summary` recoverable.
 
 ## Entire reuse gate
 
@@ -22,143 +22,120 @@ slice, and documenting installation and operations.
 ## Files
 
 ```text
-extensions/madeleine/recovery.ts
+extensions/madeleine/transcript.ts
+extensions/madeleine/summary.ts
 extensions/madeleine/lifecycle.ts
+extensions/madeleine/commands.ts
 extensions/madeleine/*.test.ts
-test/e2e/*
-README.md
 ```
 
-## Startup recovery ordering
+## Transcript boundaries
 
-For `session_start` reasons other than `reload`:
+- [ ] Read Pi session entries through `ctx.sessionManager.getEntries()`.
+- [ ] Locate the sealed Capture's start and end entry IDs.
+- [ ] Walk parent relationships from the end cursor to reconstruct that branch,
+  then reverse to chronological order.
+- [ ] Exclude the start cursor itself and all ancestors before it; include the
+  end entry.
+- [ ] Fail with a recoverable summary error when required cursors cannot be
+  resolved. Do not silently summarize the whole Conversation.
 
-1. Resolve current Repository and Conversation.
-2. List its pending Captures.
-3. For every `open` stale Capture, seal it using the current transcript leaf
-   **before** taking a new Git baseline.
-4. Start a new independent Capture for the current runtime.
-5. Persist its Pi state entry.
-6. Start background retry for frozen `pending_summary` Captures.
+## Projection policy
 
-- [ ] This ordering is mandatory: it prevents new-run changes from entering the
-  old Git diff and prevents old changes from entering the new baseline.
-- [ ] If a stale open Capture cannot be sealed, do not reattach it. Start of the
-  new Capture returns a visible conflict and Madeleine write capture remains
-  disabled for safety; Episode retrieval remains enabled.
-- [ ] Empty stale Captures become abandoned and are not queued.
-- [ ] Never recover Captures from another Repository or Conversation
-  automatically.
+- [ ] Include user text, assistant text, compaction summaries, and mutation
+  tool calls/results between the boundaries.
+- [ ] Include final reconciled paths from `FinalizationDraft` as authoritative
+  metadata.
+- [ ] Omit read tool outputs, image/audio payloads, internal custom state, and
+  unrelated tool-result bulk.
+- [ ] Strip complete `<madeleine-context ...>...</madeleine-context>` blocks
+  before constructing summary input.
+- [ ] Retain mutation tool names, relevant inputs, success/failure, and bounded
+  textual results.
+- [ ] Bound individual entries and total projection size with named constants;
+  preserve the first user goal, compaction summaries, and latest relevant
+  entries when truncation is necessary.
+- [ ] Mark the projected transcript as untrusted source data in the prompt.
 
-## Background worker
+## Summary contract
 
-- [ ] Maintain one worker per extension runtime and one active summary model
-  call at a time.
-- [ ] Snapshot the pending queue oldest-first after the new Capture starts.
-- [ ] Attempt each queued Capture at most once during that runtime.
-- [ ] Reuse Plan 9's projection, model, validation, and publication functions;
-  add no second recovery implementation.
-- [ ] Continue to the next Capture after a per-Capture validation/publication
-  failure, while reporting a concise notification.
-- [ ] Associate an AbortController with the worker.
-- [ ] On any session shutdown, abort and await worker cleanup before handling
-  the current Capture. An aborted old Capture remains pending.
-- [ ] Never append recovery prompts or results to the active Conversation.
+The model must return exactly one JSON object and no Markdown fence:
 
-## Separation invariants
-
-- [ ] Capture A's end cursor is fixed before Capture B's start cursor.
-- [ ] Capture A's final paths are frozen before Capture B's Git baseline.
-- [ ] Recording B writes cannot update A rows.
-- [ ] Publishing A cannot change B's status or raw paths.
-- [ ] Injection deduplication is scoped by B's Capture ID, not inherited from A.
-- [ ] A repeated crash leaves both Captures independently recoverable.
-
-## End-to-end harness
-
-Build a test harness using:
-
-- the real compiled `madeleine` binary;
-- a real temporary SQLite home;
-- real temporary Git repositories;
-- a fake Pi `ExtensionAPI`, session manager, and deterministic model registry.
-
-Cover:
-
-- [ ] Run A edits two files, quits, publishes one Episode, and Run B reads one
-  path and receives A's L1.
-- [ ] Run B calls `madeleine_episode` and receives A's L2.
-- [ ] `/reload` during A retains the Capture and injects each path once.
-- [ ] Hard crash after a write leaves A open; reopened Conversation seals A,
-  starts B, and publishes A in the background.
-- [ ] B writes while A recovery runs; the Episodes contain disjoint expected
-  boundaries and path sets.
-- [ ] Summary failure followed by restart succeeds on automatic retry.
-- [ ] Multiple pending Captures recover oldest-first with one model call active.
-- [ ] Empty run, dirty-at-start repository, shell edit, staged change, untracked
-  file, and commit-during-run behavior.
-- [ ] Missing binary, wrong protocol, SQLite busy, Git failure, missing model,
-  malformed summary, and forced process termination all fail open.
-
-## Concurrency verification
-
-- [ ] Add a Go integration test with concurrent exact-path Episode readers,
-  Capture path writers, and Episode publishers against one WAL database.
-- [ ] Assert no lost writes and no unexpected `SQLITE_BUSY` after bounded retry/
-  timeout handling.
-- [ ] Record benchmark helpers for 1, 10, 100, and 500 simulated agents, but do
-  not make speculative performance thresholds release blockers.
-- [ ] Document measured lookup/publication latency and busy count from a local
-  representative run in the PR description, not as committed product claims.
-
-## README and operations
-
-- [ ] Replace the placeholder README with a concise explanation of the north
-  star, Capture/Episode lifecycle, Pi MVP behavior, and trust/privacy model.
-- [ ] Document development installation:
-
-```text
-go install github.com/aduverger/madeleine/cmd/madeleine@main
-pi install git:github.com/aduverger/madeleine@main
+```json
+{
+  "l1": "One or two sentences, maximum 400 characters.",
+  "l2": "A 300-800 token brief covering goal, decisions, actions, tests and caveats."
+}
 ```
 
-- [ ] Document release installation using `@v0.1.0`, noting that the tag is
-  created after merge rather than by this PR.
-- [ ] Document `MADELEINE_HOME`, `MADELEINE_BIN`, database locations,
-  `madeleine doctor`, and `/madeleine` commands.
-- [ ] Explain what is stored: paths, summaries, timestamps, and transcript
-  references; transcript bodies remain harness-owned.
-- [ ] Explain pending recovery, explicit retry/abandon, and how to disable/remove
-  the Pi package.
-- [ ] Link `design.md` and the completed plan files.
-- [ ] Keep future features clearly labeled rather than promising them in v0.1.
+- [ ] Put the prompt text and a `summary_prompt_version = 1` constant in one
+  module.
+- [ ] Validate exact object shape, string types, trimmed non-empty values, and
+  the L1 Unicode limit.
+- [ ] Reject prose surrounding JSON, missing/extra fields, code fences, empty
+  values, and oversized L1 rather than repairing or truncating silently.
+- [ ] Do not persist model name, prompt text, hidden reasoning, or raw response
+  in the MVP.
 
-## Final CI and smoke tests
+## Active-model call
 
-- [ ] Run `make check` and `npm run check` on Linux and macOS.
-- [ ] Verify `go install` from a clean module cache.
-- [ ] Verify `pi install` package discovery from a clean temporary Pi home.
-- [ ] Manually run Pi against a disposable Git repository through edit,
-  shutdown, read-context, L2 lookup, reload, and crash/resume scenarios.
-- [ ] Run `git diff --check` and confirm no generated DB, npm cache, binary, or
-  test repository is tracked.
-- [ ] Mark checkboxes in `plan1.md` through `plan10.md` only for work actually
-  merged in the stack.
+- [ ] Use `ctx.model`; if absent or unauthenticated, leave the Capture pending.
+- [ ] Call `ctx.modelRegistry.complete` with one user message, the active model,
+  `cacheRetention: "none"`, a fresh UUIDv7 session ID, and `maxTokens: 1200`.
+- [ ] Use an AbortController with a 30-second timeout and combine it with any
+  lifecycle cancellation.
+- [ ] Extract text content only and validate the strict JSON contract.
+- [ ] Never insert the summarization request/response into the active Pi
+  Conversation.
 
-## MVP acceptance criteria
+## Clean finalization
 
-- [ ] The complete clean-run, read-context, and L2 flow works with real Pi.
-- [ ] Crash/resume produces an independent new Capture and automatically
-  retries the old one without blocking startup.
-- [ ] All failures preserve Pi behavior and pending recoverable data.
-- [ ] Exact-path retrieval remains deterministic and contains no semantic
-  search/ranking layer.
-- [ ] The library, CLI, schema, Pi package, installation, and recovery behavior
-  agree with `design.md`.
-- [ ] The repository is ready for a post-merge `v0.1.0` tag.
+- [ ] For every non-reload shutdown, stop background work, seal the current
+  Capture, and return immediately for an empty/abandoned draft.
+- [ ] Project, summarize, then call `episode.publish` with the Capture ID and
+  validated L1/L2.
+- [ ] Treat an identical publish retry as success.
+- [ ] On model, parse, timeout, or publish failure, notify once and leave
+  `pending_summary` unchanged.
+- [ ] Clear current in-memory Capture state only after empty abandonment or
+  confirmed Episode publication.
 
-## Excluded from this PR and v0.1
+## Explicit retry command
 
-Other harnesses, transcript backfill, Agent Trace, MCP server, folder/symbol/
-rename memory, copied transcripts, multiplayer UI, daemon, Postgres, network
-sync, embeddings, and semantic ranking.
+- [ ] Add `/madeleine retry [capture-id]`.
+- [ ] With an ID, require it to be pending in the current Repository and
+  Conversation.
+- [ ] Without an ID, retry pending Captures for the current Conversation
+  oldest-first, one at a time.
+- [ ] Reconstruct each Capture's transcript range independently.
+- [ ] Report per-Capture success/failure without abandoning failures.
+
+## Tests
+
+- [ ] Linear branch projection and exclusion of pre-start entries.
+- [ ] Forked branch reconstruction using parent IDs.
+- [ ] Compaction entries and a Capture spanning compaction.
+- [ ] Read-output omission, mutation retention, binary-content omission, and
+  recursive Madeleine-context stripping.
+- [ ] Projection truncation preserves the required goal/summary/tail policy.
+- [ ] Valid summary, surrounding prose, code fence, extra key, missing key,
+  empty value, Unicode-overlong L1, and empty model response.
+- [ ] No model/auth, model rejection, timeout, cancellation, and publish error
+  all preserve `pending_summary`.
+- [ ] Clean quit/new/resume/fork publishes exactly one Episode; reload does not.
+- [ ] Empty sealed Capture makes no model call.
+- [ ] Retry one and retry queue behavior.
+
+## Acceptance criteria
+
+- [ ] A normal Pi run with modified files creates one queryable Episode before
+  shutdown completes or leaves an explicitly pending Capture.
+- [ ] The Episode summary covers only the Capture interval, not the whole Pi
+  Conversation.
+- [ ] Injected Madeleine context cannot recursively become memory.
+- [ ] No summary failure loses paths or prevents later retry.
+
+## Excluded from this PR
+
+Automatic crash recovery on startup, concurrent recovery/current-run
+coordination, additional summarizer providers, and past transcript import.

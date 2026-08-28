@@ -29,6 +29,8 @@ func TestPublicContractsAreImportable(t *testing.T) {
 		madeleine.EpisodeDetail{},
 	}
 	var _ func(context.Context, madeleine.Options) (*madeleine.Store, error) = madeleine.Open
+	var _ func(context.Context, string) (madeleine.Repository, error) = madeleine.ResolveRepository
+	var _ func(*madeleine.Store) error = (*madeleine.Store).Close
 	var _ func(*madeleine.Store, context.Context, string) (madeleine.Repository, error) = (*madeleine.Store).ResolveRepository
 	var _ func(*madeleine.Store, context.Context, madeleine.StartCaptureRequest) (madeleine.Capture, error) = (*madeleine.Store).StartCapture
 	var _ func(*madeleine.Store, context.Context, madeleine.CaptureID) (madeleine.Capture, error) = (*madeleine.Store).GetCapture

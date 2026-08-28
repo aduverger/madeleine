@@ -1,14 +1,14 @@
-# Plan 9: Pi summary generation and clean publication
+# Plan 9: Pi Capture lifecycle
 
 PR scope: one PR  
 Depends on: `plan8.md`  
-Design decisions: D-003, D-006, D-013, D-016, D-017, D-021
+Design decisions: D-004, D-005, D-006, D-007, D-011, D-014, D-016, D-021
 
 ## Goal
 
-Complete the clean-run pipeline: seal a Capture, project its bounded Pi
-transcript, generate validated L1/L2 with the active model, and publish an
-immutable Episode. Any failure must leave `pending_summary` recoverable.
+Connect Pi lifecycle and successful mutation events to Captures. Preserve one
+Capture across `/reload`, create new Captures for distinct runs, and expose
+operational status/abandon commands. Episode summarization starts in Plan 10.
 
 ## Entire reuse gate
 
@@ -22,120 +22,122 @@ immutable Episode. Any failure must leave `pending_summary` recoverable.
 ## Files
 
 ```text
-extensions/madeleine/transcript.ts
-extensions/madeleine/summary.ts
+extensions/madeleine/index.ts
+extensions/madeleine/state.ts
 extensions/madeleine/lifecycle.ts
 extensions/madeleine/commands.ts
 extensions/madeleine/*.test.ts
 ```
 
-## Transcript boundaries
+## Persisted Pi state
 
-- [ ] Read Pi session entries through `ctx.sessionManager.getEntries()`.
-- [ ] Locate the sealed Capture's start and end entry IDs.
-- [ ] Walk parent relationships from the end cursor to reconstruct that branch,
-  then reverse to chronological order.
-- [ ] Exclude the start cursor itself and all ancestors before it; include the
-  end entry.
-- [ ] Fail with a recoverable summary error when required cursors cannot be
-  resolved. Do not silently summarize the whole Conversation.
+Use `pi.appendEntry("madeleine-state-v1", data)` with:
 
-## Projection policy
-
-- [ ] Include user text, assistant text, compaction summaries, and mutation
-  tool calls/results between the boundaries.
-- [ ] Include final reconciled paths from `FinalizationDraft` as authoritative
-  metadata.
-- [ ] Omit read tool outputs, image/audio payloads, internal custom state, and
-  unrelated tool-result bulk.
-- [ ] Strip complete `<madeleine-context ...>...</madeleine-context>` blocks
-  before constructing summary input.
-- [ ] Retain mutation tool names, relevant inputs, success/failure, and bounded
-  textual results.
-- [ ] Bound individual entries and total projection size with named constants;
-  preserve the first user goal, compaction summaries, and latest relevant
-  entries when truncation is necessary.
-- [ ] Mark the projected transcript as untrusted source data in the prompt.
-
-## Summary contract
-
-The model must return exactly one JSON object and no Markdown fence:
-
-```json
-{
-  "l1": "One or two sentences, maximum 400 characters.",
-  "l2": "A 300-800 token brief covering goal, decisions, actions, tests and caveats."
-}
+```text
+version: 1
+conversation_id: string
+capture_id: string
+injected_paths: string[]
 ```
 
-- [ ] Put the prompt text and a `summary_prompt_version = 1` constant in one
-  module.
-- [ ] Validate exact object shape, string types, trimmed non-empty values, and
-  the L1 Unicode limit.
-- [ ] Reject prose surrounding JSON, missing/extra fields, code fences, empty
-  values, and oversized L1 rather than repairing or truncating silently.
-- [ ] Do not persist model name, prompt text, hidden reasoning, or raw response
-  in the MVP.
+- [ ] Custom entries do not enter model context and are not given a renderer.
+- [ ] Restore only the newest valid entry for the current Conversation.
+- [ ] Append a new snapshot after Capture creation and after each newly
+  injected path; sort/deduplicate paths before saving.
+- [ ] Replace Plan 8's runtime-only injection set with this state so reload
+  retains deduplication.
 
-## Active-model call
+## Conversation identity
 
-- [ ] Use `ctx.model`; if absent or unauthenticated, leave the Capture pending.
-- [ ] Call `ctx.modelRegistry.complete` with one user message, the active model,
-  `cacheRetention: "none"`, a fresh UUIDv7 session ID, and `maxTokens: 1200`.
-- [ ] Use an AbortController with a 30-second timeout and combine it with any
-  lifecycle cancellation.
-- [ ] Extract text content only and validate the strict JSON contract.
-- [ ] Never insert the summarization request/response into the active Pi
-  Conversation.
+- [ ] Use the cleaned absolute current Pi session-file path as the stable
+  external Conversation ID and transcript reference when available.
+- [ ] For an ephemeral session, generate a UUIDv7 runtime Conversation ID and
+  leave transcript reference empty; document that crash recovery cannot span
+  process death for that session.
+- [ ] Scope every Conversation to `ctx.cwd`'s resolved Repository and harness
+  `pi`.
 
-## Clean finalization
+## Lifecycle matrix
 
-- [ ] For every non-reload shutdown, stop background work, seal the current
-  Capture, and return immediately for an empty/abandoned draft.
-- [ ] Project, summarize, then call `episode.publish` with the Capture ID and
-  validated L1/L2.
-- [ ] Treat an identical publish retry as success.
-- [ ] On model, parse, timeout, or publish failure, notify once and leave
-  `pending_summary` unchanged.
-- [ ] Clear current in-memory Capture state only after empty abandonment or
-  confirmed Episode publication.
+| Event | Required behavior |
+|---|---|
+| `session_start: startup` | Start a new Capture when no older open Capture blocks it. |
+| `session_start: new` | Start a new Capture for the new Conversation. |
+| `session_start: resume` | Start a new Capture; never reattach a previous run. |
+| `session_start: fork` | Start a new Capture for the forked Conversation. |
+| `session_start: reload` | Reattach the existing open Capture. |
+| `session_shutdown: reload` | Preserve the open Capture; do not seal. |
+| other `session_shutdown` | Seal the current Capture. |
 
-## Explicit retry command
+- [ ] Store `ctx.sessionManager.getLeafId()` as the start/end cursor.
+- [ ] On reload, validate the persisted Capture with `capture.get` and require
+  `status=open`.
+- [ ] If reload state is missing, query pending Captures for the Conversation
+  and reattach its single open Capture; start a new one only when none exists.
+- [ ] Until Plan 11, an older open Capture encountered on non-reload startup
+  causes a one-time warning and disables new write capture for that run rather
+  than reattaching or corrupting boundaries.
 
-- [ ] Add `/madeleine retry [capture-id]`.
-- [ ] With an ID, require it to be pending in the current Repository and
-  Conversation.
-- [ ] Without an ID, retry pending Captures for the current Conversation
-  oldest-first, one at a time.
-- [ ] Reconstruct each Capture's transcript range independently.
-- [ ] Report per-Capture success/failure without abandoning failures.
+## Mutation recording
+
+- [ ] Listen to successful `tool_result` events for built-in `edit` and
+  `write` only.
+- [ ] Extract and normalize the typed path; failed results record nothing.
+- [ ] Record the first occurrence immediately with `capture.record_write`.
+- [ ] Keep an in-memory `path -> last persisted monotonic time` map and refresh
+  a repeated path no more often than every 30 seconds.
+- [ ] Await the short RPC call but preserve the original Pi result on all
+  failures.
+- [ ] Do not parse Bash commands; Plan 5's seal reconciliation covers surviving
+  shell changes.
+
+## Shutdown sealing
+
+- [ ] Cancel extension-owned in-flight RPC work before non-reload shutdown.
+- [ ] Call `capture.seal` with the current leaf ID.
+- [ ] Treat an empty result as successfully abandoned.
+- [ ] Leave non-empty Captures `pending_summary`; Plan 10 publishes them.
+- [ ] Notify once on failure and leave an open Capture for later recovery.
+
+## Commands
+
+Register one Pi command, `/madeleine`, and parse these strict subcommands:
+
+```text
+/madeleine status
+/madeleine abandon <capture-id>
+/madeleine doctor
+```
+
+- [ ] `status` lists open/pending Captures for the current Repository and marks
+  the current one.
+- [ ] `abandon` only accepts an ID returned for the current Repository and asks
+  for UI confirmation before RPC; finalized Captures cannot be abandoned.
+- [ ] `doctor` shows the existing structured checks in Pi UI.
+- [ ] Unknown or missing subcommands print concise usage without invoking RPC.
 
 ## Tests
 
-- [ ] Linear branch projection and exclusion of pre-start entries.
-- [ ] Forked branch reconstruction using parent IDs.
-- [ ] Compaction entries and a Capture spanning compaction.
-- [ ] Read-output omission, mutation retention, binary-content omission, and
-  recursive Madeleine-context stripping.
-- [ ] Projection truncation preserves the required goal/summary/tail policy.
-- [ ] Valid summary, surrounding prose, code fence, extra key, missing key,
-  empty value, Unicode-overlong L1, and empty model response.
-- [ ] No model/auth, model rejection, timeout, cancellation, and publish error
-  all preserve `pending_summary`.
-- [ ] Clean quit/new/resume/fork publishes exactly one Episode; reload does not.
-- [ ] Empty sealed Capture makes no model call.
-- [ ] Retry one and retry queue behavior.
+- [ ] Exercise every lifecycle matrix row with a fake session manager.
+- [ ] Verify reload reattachment and persisted injection deduplication.
+- [ ] Verify startup/resume never reattaches an old run.
+- [ ] Successful edit/write, repeated throttled write, failed tool result,
+  read, Bash, and malformed path cases.
+- [ ] Seal success, empty abandonment, Git/RPC failure, and reload no-op.
+- [ ] Persist/restore state across a simulated extension module reload.
+- [ ] Ephemeral Conversation behavior.
+- [ ] Status output, abandon confirmation/cancel, wrong-Repository ID, and
+  doctor output.
 
 ## Acceptance criteria
 
-- [ ] A normal Pi run with modified files creates one queryable Episode before
-  shutdown completes or leaves an explicitly pending Capture.
-- [ ] The Episode summary covers only the Capture interval, not the whole Pi
-  Conversation.
-- [ ] Injected Madeleine context cannot recursively become memory.
-- [ ] No summary failure loses paths or prevents later retry.
+- [ ] Pi writes are durable in SQLite before the Pi run ends.
+- [ ] `/reload` retains exactly one open Capture and does not duplicate
+  historical context.
+- [ ] Clean non-reload shutdown leaves a deterministic sealed draft.
+- [ ] The adapter still fails open when every lifecycle RPC is forced to fail.
 
 ## Excluded from this PR
 
-Automatic crash recovery on startup, concurrent recovery/current-run
-coordination, additional summarizer providers, and past transcript import.
+Model summarization, Episode publication, automatic stale-Capture recovery, and
+multi-agent Capture activity display.

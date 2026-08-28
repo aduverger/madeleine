@@ -5,44 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
-
-func TestGeneratedIDsAreUUIDv7(t *testing.T) {
-	t.Parallel()
-
-	generators := []struct {
-		name     string
-		generate func() (string, error)
-	}{
-		{"repository", func() (string, error) { value, err := newRepositoryID(); return string(value), err }},
-		{"conversation", func() (string, error) { value, err := newConversationID(); return string(value), err }},
-		{"capture", func() (string, error) { value, err := newCaptureID(); return string(value), err }},
-		{"episode", func() (string, error) { value, err := newEpisodeID(); return string(value), err }},
-	}
-
-	seen := make(map[string]bool, len(generators))
-	for _, test := range generators {
-		t.Run(test.name, func(t *testing.T) {
-			value, err := test.generate()
-			if err != nil {
-				t.Fatalf("generate ID: %v", err)
-			}
-			parsed, err := uuid.Parse(value)
-			if err != nil {
-				t.Fatalf("parse generated ID %q: %v", value, err)
-			}
-			if parsed.Version() != 7 {
-				t.Fatalf("ID version = %d, want 7", parsed.Version())
-			}
-			if seen[value] {
-				t.Fatalf("duplicate generated ID %q", value)
-			}
-			seen[value] = true
-		})
-	}
-}
 
 func TestPublicTimestampJSONUsesUTCRFC3339Nano(t *testing.T) {
 	t.Parallel()

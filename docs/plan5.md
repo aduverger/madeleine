@@ -4,6 +4,10 @@ PR scope: one PR
 Depends on: `plan4.md`  
 Design decisions: D-002, D-007, D-009, D-016, D-021
 
+> Historical note: paths and public-package references describe the merged PR.
+> Plan 6 later internalizes the Go implementation when Madeleine becomes a
+> standalone application.
+
 ## Goal
 
 Make Capture final paths authoritative enough for real agent work by combining

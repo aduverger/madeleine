@@ -72,7 +72,7 @@ Every implementation PR must:
 4. document why reuse was rejected when equivalent Entire code was inspected
    but did not fit.
 
-Madeleine's domain model, public API, and invariants remain authoritative. Reuse
+Madeleine's domain model, RPC contract, and invariants remain authoritative. Reuse
 the smallest coherent implementation rather than importing unrelated Entire
 architecture. Fresh code is valid when the semantics differ, but it should be a
 deliberate conclusion after inspection, not the default starting point.
@@ -373,29 +373,47 @@ multi-machine operation should use a server store such as PostgreSQL. Turso's
 concurrent embedded database direction remains worth watching, but it is not an
 MVP dependency.
 
-## Public interfaces
+## Application boundary
 
-Madeleine ships a public Go library and a CLI boundary for non-Go harnesses.
-The root `madeleine` package exposes a concrete `Store`:
+Madeleine is a standalone application. All Go implementation packages are
+private; versioned JSON RPC is the sole supported external API.
 
-```go
-Open(context.Context, Options) (*Store, error)
-ResolveRepository(context.Context, string) (Repository, error)
-
-(*Store).StartCapture(context.Context, StartCaptureRequest) (Capture, error)
-(*Store).GetCapture(context.Context, CaptureID) (Capture, error)
-(*Store).RecordWrite(context.Context, RecordWriteRequest) error
-(*Store).ListPendingCaptures(context.Context, PendingCaptureQuery) ([]Capture, error)
-(*Store).SealCapture(context.Context, SealCaptureRequest) (FinalizationDraft, error)
-(*Store).PublishEpisode(context.Context, PublishEpisodeRequest) (Episode, error)
-(*Store).AbandonCapture(context.Context, CaptureID) error
-(*Store).ContextForPaths(context.Context, ContextRequest) ([]FileContext, error)
-(*Store).GetEpisode(context.Context, EpisodeRequest) (EpisodeDetail, error)
-(*Store).Close() error
+```text
+cmd/madeleine        executable entry point
+internal/rpc         JSON protocol and dispatch
+internal/madeleine   product rules and orchestration
+internal/store       SQLite persistence and migrations
+internal/gitstate    read-only Git snapshots and reconciliation
+internal/gitcmd      Git process execution
+internal/repopath    repository-relative path normalization
 ```
 
-Public sentinel errors support `errors.Is`: `ErrNotFound`, `ErrConflict`,
-`ErrInvalidState`, `ErrNotGitRepository`, and `ErrOutsideRepository`.
+Dependencies point from RPC through `internal/madeleine` to concrete supporting
+packages. `internal/store` contains SQL and persistence records and never
+imports the product layer. SQLite remains the only implementation; there is no
+storage interface or configurable backend.
+
+The private application service retains one canonical operation vocabulary for
+RPC dispatch:
+
+```go
+Open(context.Context, Options) (*Service, error)
+ResolveRepository(context.Context, string) (Repository, error)
+
+(*Service).StartCapture(context.Context, StartCaptureRequest) (Capture, error)
+(*Service).GetCapture(context.Context, CaptureID) (Capture, error)
+(*Service).RecordWrite(context.Context, RecordWriteRequest) error
+(*Service).ListPendingCaptures(context.Context, PendingCaptureQuery) ([]Capture, error)
+(*Service).SealCapture(context.Context, SealCaptureRequest) (FinalizationDraft, error)
+(*Service).PublishEpisode(context.Context, PublishEpisodeRequest) (Episode, error)
+(*Service).AbandonCapture(context.Context, CaptureID) error
+(*Service).ContextForPaths(context.Context, ContextRequest) ([]FileContext, error)
+(*Service).GetEpisode(context.Context, EpisodeRequest) (EpisodeDetail, error)
+(*Service).Close() error
+```
+
+Internal sentinel errors support `errors.Is`; the RPC layer maps them to stable
+protocol error codes.
 
 The CLI uses one process per operation:
 
@@ -411,7 +429,7 @@ object to stdout, and sends diagnostics only to stderr.
 {"protocol_version":1,"ok":false,"error":{"code":"...","message":"..."}}
 ```
 
-RPC methods mirror the Store operations. `madeleine doctor` is human-readable;
+RPC methods mirror the Service operations. `madeleine doctor` is human-readable;
 `madeleine doctor --json` uses the same envelope.
 
 ## Pi package
@@ -470,14 +488,15 @@ The MVP is complete when the Pi vertical slice proves all of the following:
 - real-time read presence or multi-agent steering UI;
 - daemon, socket service, network API, Postgres, replication, or team sharing;
 - web UI, MCP server, commit attribution, or line-survival tracking;
-- configurable storage backends or summarizer-provider abstraction.
+- configurable storage backends or summarizer-provider abstraction;
+- a public Go SDK or importable root package.
 
 ## Future direction
 
 Future work is driven by dogfooding and measurements:
 
-1. Add other harness adapters while keeping their lifecycle details outside the
-   core.
+1. Add other harness adapters through the versioned CLI while keeping their
+   lifecycle details outside the core.
 2. Backfill past harness transcripts using isolated importers.
 3. Derive folder history by aggregating descendant exact paths.
 4. Add rename/path lineage through Git when exact-path misses prove painful.
@@ -541,6 +560,13 @@ Pebble and Badger solve much larger write-volume problems. DuckDB targets
 analytics and has a worse multi-process write fit. SQLite has the best balance
 of local concurrency, inspectability, migrations, and contributor familiarity.
 
+### Public Go library
+
+No external Go consumer is known. A public package would create a second
+compatibility surface beside JSON RPC and shape internal dependencies around
+hypothetical embedding. An SDK can be introduced later if a concrete consumer
+justifies it.
+
 ### Daemon first
 
 A daemon adds startup, supervision, socket, versioning, and cross-platform IPC
@@ -560,7 +586,7 @@ reference boundary.
 | D-007 | Persist successful writes during the run. | Locked | Crashes retain useful Capture state. Reads are not persisted. |
 | D-008 | SQLite WAL is the sole MVP persistence layer. | Locked | No canonical JSON, journal files, daemon, or alternate backend. |
 | D-009 | Use Git CLI reconciliation as a safety net. | Locked | Shell and commit changes augment structured tool evidence. |
-| D-010 | Build a harness-neutral Go library plus JSON CLI. | Locked | Pi stays thin; later adapters reuse the same semantics. |
+| D-010 | Build a harness-neutral Go library plus JSON CLI. | Superseded by D-022 | No concrete external Go consumer justified maintaining two APIs. |
 | D-011 | Pi is the first complete reference adapter. | Locked | The final MVP is validated in the user's primary harness. |
 | D-012 | Inject five newest L1s per exact path. | MVP policy | Context selection is deterministic and isolated for future evolution. |
 | D-013 | Generate summaries with Pi's active model. | Locked | No separate model-provider configuration in MVP. |
@@ -572,11 +598,14 @@ reference boundary.
 | D-019 | Optimize only after concurrency benchmarks. | Locked | A broker/Postgres is a measured evolution, not MVP scaffolding. |
 | D-020 | Support macOS and Linux first. | Locked | CGo-free SQLite keeps later Windows support feasible. |
 | D-021 | Inspect Entire and reuse compatible code before rebuilding equivalent mechanics. | Locked | Each PR records reused provenance or why reuse did not fit; Madeleine's semantics remain authoritative. |
+| D-022 | Ship Madeleine as a standalone application with private Go packages and versioned JSON RPC as its external API. | Locked | Harnesses share one protocol; internal package structure can evolve without Go API compatibility constraints. |
 
 ## Reference documentation
 
 - [Go module dependency management](https://go.dev/doc/modules/managing-dependencies)
 - [Go toolchain selection](https://go.dev/doc/toolchain)
+- [Organizing a Go module](https://go.dev/doc/modules/layout)
+- [Go package names](https://go.dev/blog/package-names)
 - [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite)
 - [Entire CLI source](https://github.com/entireio/cli)
 - [Pi extension API](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md)

@@ -1,8 +1,10 @@
-package madeleine
+package store
 
 import (
 	"errors"
 	"fmt"
+
+	"github.com/aduverger/madeleine/internal/repopath"
 )
 
 var (
@@ -10,7 +12,7 @@ var (
 	ErrConflict          = errors.New("conflict")
 	ErrInvalidState      = errors.New("invalid state")
 	ErrNotGitRepository  = errors.New("not a Git repository")
-	ErrOutsideRepository = errors.New("path is outside repository")
+	ErrOutsideRepository = repopath.ErrOutsideRepository
 )
 
 type operationError struct {
