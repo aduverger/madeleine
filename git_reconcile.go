@@ -33,7 +33,10 @@ func (s *Store) reconcileCaptureGitPaths(ctx context.Context, captureID CaptureI
 	if err != nil {
 		return nil, err
 	}
+	return reconcileGitSnapshots(ctx, baseline, end)
+}
 
+func reconcileGitSnapshots(ctx context.Context, baseline captureGitBaseline, end gitSnapshot) ([]string, error) {
 	finalPaths := make(map[string]struct{})
 	committedPaths, err := changedCommittedPaths(ctx, baseline, end)
 	if err != nil {
@@ -62,31 +65,50 @@ func (s *Store) reconcileCaptureGitPaths(ctx context.Context, captureID CaptureI
 }
 
 func (s *Store) loadCaptureGitBaseline(ctx context.Context, captureID CaptureID) (captureGitBaseline, error) {
+	baseline, err := scanCaptureGitBaseline(s.db.QueryRowContext(ctx, `
+		SELECT worktree_root, status, git_start_head, git_start_head_exists
+		FROM captures WHERE id = ?`, captureID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return captureGitBaseline{}, ErrNotFound
+	}
+	if err != nil {
+		return captureGitBaseline{}, err
+	}
+	baseline.Paths, err = s.loadCaptureGitBaselinePaths(ctx, captureID)
+	if err != nil {
+		return captureGitBaseline{}, err
+	}
+	return baseline, nil
+}
+
+func scanCaptureGitBaseline(scanner captureScanner) (captureGitBaseline, error) {
 	var baseline captureGitBaseline
 	var head sql.NullString
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT worktree_root, status, git_start_head, git_start_head_exists
-		FROM captures WHERE id = ?`, captureID,
-	).Scan(&baseline.WorktreeRoot, &baseline.Status, &head, &baseline.HeadExists); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return captureGitBaseline{}, ErrNotFound
-		}
+	if err := scanner.Scan(
+		&baseline.WorktreeRoot, &baseline.Status, &head, &baseline.HeadExists,
+	); err != nil {
 		return captureGitBaseline{}, err
 	}
 	baseline.Head = head.String
 	if baseline.HeadExists != head.Valid {
 		return captureGitBaseline{}, fmt.Errorf("%w: Capture Git HEAD baseline is inconsistent", ErrInvalidState)
 	}
+	return baseline, nil
+}
 
+func (s *Store) loadCaptureGitBaselinePaths(
+	ctx context.Context,
+	captureID CaptureID,
+) (map[string]gitPathSnapshot, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT path, porcelain_status, worktree_fingerprint, index_identity
 		FROM capture_git_baseline_paths WHERE capture_id = ?`, captureID)
 	if err != nil {
-		return captureGitBaseline{}, err
+		return nil, err
 	}
 	defer rows.Close()
 
-	baseline.Paths = make(map[string]gitPathSnapshot)
+	paths := make(map[string]gitPathSnapshot)
 	for rows.Next() {
 		var path string
 		var worktreeFingerprint, indexIdentity sql.NullString
@@ -94,19 +116,19 @@ func (s *Store) loadCaptureGitBaseline(ctx context.Context, captureID CaptureID)
 		if err := rows.Scan(
 			&path, &snapshot.PorcelainStatus, &worktreeFingerprint, &indexIdentity,
 		); err != nil {
-			return captureGitBaseline{}, err
+			return nil, err
 		}
 		if !worktreeFingerprint.Valid {
-			return captureGitBaseline{}, fmt.Errorf("%w: Capture Git path %q has no fingerprint", ErrInvalidState, path)
+			return nil, fmt.Errorf("%w: Capture Git path %q has no fingerprint", ErrInvalidState, path)
 		}
 		snapshot.WorktreeFingerprint = worktreeFingerprint.String
 		snapshot.IndexIdentity = indexIdentity.String
-		baseline.Paths[path] = snapshot
+		paths[path] = snapshot
 	}
 	if err := rows.Err(); err != nil {
-		return captureGitBaseline{}, err
+		return nil, err
 	}
-	return baseline, nil
+	return paths, nil
 }
 
 func changedCommittedPaths(ctx context.Context, baseline captureGitBaseline, end gitSnapshot) ([]string, error) {
