@@ -16,13 +16,9 @@ const episodeSelect = `
 	FROM episodes e
 	JOIN conversations conversation ON conversation.id = e.conversation_id`
 
-type episodeQueryer interface {
+type episodeQuerier interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
-}
-
-type episodeScanner interface {
-	Scan(...any) error
 }
 
 func (s *Store) PublishEpisode(ctx context.Context, request PublishEpisodeRequest) (Episode, error) {
@@ -43,8 +39,7 @@ func (s *Store) PublishEpisode(ctx context.Context, request PublishEpisodeReques
 			return err
 		}
 
-		switch capture.Status {
-		case CaptureStatusFinalized:
+		if capture.Status == CaptureStatusFinalized {
 			if capture.EpisodeID == "" {
 				return fmt.Errorf("%w: finalized Capture has no Episode", ErrInvalidState)
 			}
@@ -56,8 +51,8 @@ func (s *Store) PublishEpisode(ctx context.Context, request PublishEpisodeReques
 				return fmt.Errorf("%w: Capture was published with different summaries", ErrConflict)
 			}
 			return nil
-		case CaptureStatusPendingSummary:
-		default:
+		}
+		if capture.Status != CaptureStatusPendingSummary {
 			return fmt.Errorf("%w: Capture status is %q", ErrInvalidState, capture.Status)
 		}
 
@@ -127,31 +122,31 @@ func insertEpisodePaths(
 	repositoryID RepositoryID,
 	paths []string,
 ) error {
-	values := make([]string, len(paths))
+	placeholders := make([]string, len(paths))
 	arguments := make([]any, 0, len(paths)*3)
 	for index, path := range paths {
-		values[index] = "(?, ?, ?)"
+		placeholders[index] = "(?, ?, ?)"
 		arguments = append(arguments, episodeID, repositoryID, path)
 	}
 	_, err := transaction.ExecContext(ctx, `
 		INSERT INTO episode_files(episode_id, repository_id, path) VALUES `+
-		strings.Join(values, ", "), arguments...)
+		strings.Join(placeholders, ", "), arguments...)
 	return err
 }
 
 func loadEpisode(
 	ctx context.Context,
-	queryer episodeQueryer,
+	querier episodeQuerier,
 	repositoryID RepositoryID,
 	episodeID EpisodeID,
 ) (Episode, error) {
-	episode, err := scanEpisode(queryer.QueryRowContext(ctx,
+	episode, err := scanEpisode(querier.QueryRowContext(ctx,
 		episodeSelect+" WHERE e.repository_id = ? AND e.id = ?", repositoryID, episodeID,
 	))
 	if err != nil {
 		return Episode{}, err
 	}
-	episode.Paths, err = loadEpisodePaths(ctx, queryer, repositoryID, episodeID)
+	episode.Paths, err = loadEpisodePaths(ctx, querier, repositoryID, episodeID)
 	if err != nil {
 		return Episode{}, err
 	}
@@ -160,11 +155,11 @@ func loadEpisode(
 
 func loadEpisodePaths(
 	ctx context.Context,
-	queryer episodeQueryer,
+	querier episodeQuerier,
 	repositoryID RepositoryID,
 	episodeID EpisodeID,
 ) ([]string, error) {
-	rows, err := queryer.QueryContext(ctx, `
+	rows, err := querier.QueryContext(ctx, `
 		SELECT path FROM episode_files
 		WHERE repository_id = ? AND episode_id = ? ORDER BY path`,
 		repositoryID, episodeID)
@@ -184,7 +179,7 @@ func loadEpisodePaths(
 	return paths, rows.Err()
 }
 
-func scanEpisode(scanner episodeScanner) (Episode, error) {
+func scanEpisode(scanner interface{ Scan(...any) error }) (Episode, error) {
 	var episode Episode
 	var transcriptRef sql.NullString
 	var startedAt, endedAt, createdAt string

@@ -66,8 +66,9 @@ func TestContextForPathsDeduplicatesAndLimitsNewestEpisodes(t *testing.T) {
 		return wantTarget[i].EndedAt.After(wantTarget[j].EndedAt)
 	})
 	wantTarget = wantTarget[:maxEpisodesPerPath]
-	if got := summaryIDs(contexts[0].Episodes); !reflect.DeepEqual(got, episodeIDs(wantTarget)) {
-		t.Fatalf("target Episode IDs = %v, want %v", got, episodeIDs(wantTarget))
+	wantTargetIDs := episodeIDs(wantTarget)
+	if got := summaryIDs(contexts[0].Episodes); !reflect.DeepEqual(got, wantTargetIDs) {
+		t.Fatalf("target Episode IDs = %v, want %v", got, wantTargetIDs)
 	}
 	for index, summary := range contexts[0].Episodes {
 		want := wantTarget[index]

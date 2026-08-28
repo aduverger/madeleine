@@ -17,16 +17,16 @@ func (s *Store) ContextForPaths(ctx context.Context, request ContextRequest) ([]
 	}
 
 	contexts := make([]FileContext, 0, len(request.Paths))
-	contextByPath := make(map[string]int, len(request.Paths))
-	for _, input := range request.Paths {
-		path, err := normalizeRepositoryPath(repository.WorktreeRoot, input)
+	contextIndexByPath := make(map[string]int, len(request.Paths))
+	for _, requestedPath := range request.Paths {
+		path, err := normalizeRepositoryPath(repository.WorktreeRoot, requestedPath)
 		if err != nil {
 			return nil, err
 		}
-		if _, exists := contextByPath[path]; exists {
+		if _, exists := contextIndexByPath[path]; exists {
 			continue
 		}
-		contextByPath[path] = len(contexts)
+		contextIndexByPath[path] = len(contexts)
 		contexts = append(contexts, FileContext{Path: path, Episodes: []EpisodeSummary{}})
 	}
 	if len(contexts) == 0 {
@@ -48,7 +48,7 @@ func (s *Store) ContextForPaths(ctx context.Context, request ContextRequest) ([]
 				ROW_NUMBER() OVER (
 					PARTITION BY files.path
 					ORDER BY episode.ended_at DESC, episode.id DESC
-				) AS position
+				) AS recency_rank
 			FROM episode_files files
 			JOIN episodes episode ON episode.id = files.episode_id
 			WHERE files.repository_id = ?
@@ -57,7 +57,7 @@ func (s *Store) ContextForPaths(ctx context.Context, request ContextRequest) ([]
 		)
 		SELECT path, id, ended_at, harness, l1
 		FROM ranked_episodes
-		WHERE position <= ?
+		WHERE recency_rank <= ?
 		ORDER BY path, ended_at DESC, id DESC`, arguments...)
 	if err != nil {
 		return nil, wrapError("get context for paths", request.RepositoryRoot, err)
@@ -74,11 +74,11 @@ func (s *Store) ContextForPaths(ctx context.Context, request ContextRequest) ([]
 		if err != nil {
 			return nil, wrapError("get context for paths", path, fmt.Errorf("parse Episode end time: %w", err))
 		}
-		index, exists := contextByPath[path]
+		contextIndex, exists := contextIndexByPath[path]
 		if !exists {
 			return nil, wrapError("get context for paths", path, ErrInvalidState)
 		}
-		contexts[index].Episodes = append(contexts[index].Episodes, summary)
+		contexts[contextIndex].Episodes = append(contexts[contextIndex].Episodes, summary)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, wrapError("get context for paths", request.RepositoryRoot, err)
