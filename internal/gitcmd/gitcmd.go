@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -65,6 +66,7 @@ func Run(ctx context.Context, executable, workingDirectory string, args []string
 
 	command := exec.CommandContext(commandContext, executable, args...)
 	command.Dir = workingDirectory
+	command.Env = environmentWithoutRepositoryOverrides()
 	command.WaitDelay = commandWaitDelay
 	var stdout bytes.Buffer
 	stderr := &limitedBuffer{limit: MaxStderrBytes}
@@ -90,6 +92,26 @@ func Run(ctx context.Context, executable, workingDirectory string, args []string
 	}
 
 	return stdout.Bytes(), nil
+}
+
+func environmentWithoutRepositoryOverrides() []string {
+	const (
+		gitDirectory = "GIT_DIR="
+		gitWorktree  = "GIT_WORK_TREE="
+		gitIndex     = "GIT_INDEX_FILE="
+	)
+
+	environment := os.Environ()
+	filtered := make([]string, 0, len(environment))
+	for _, value := range environment {
+		if strings.HasPrefix(value, gitDirectory) ||
+			strings.HasPrefix(value, gitWorktree) ||
+			strings.HasPrefix(value, gitIndex) {
+			continue
+		}
+		filtered = append(filtered, value)
+	}
+	return filtered
 }
 
 type limitedBuffer struct {

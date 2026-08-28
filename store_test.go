@@ -55,7 +55,7 @@ func TestOpenMigratesAndReopensStore(t *testing.T) {
 
 	for _, table := range []string{
 		"repositories", "repository_aliases", "conversations", "captures", "capture_paths",
-		"episodes", "episode_files",
+		"capture_git_baseline_paths", "episodes", "episode_files",
 	} {
 		if !databaseObjectExists(t, reopened.db, "table", table) {
 			t.Errorf("table %q does not exist", table)
@@ -77,8 +77,26 @@ func TestOpenMigratesAndReopensStore(t *testing.T) {
 	if err := fresh.db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&freshMigrationCount); err != nil {
 		t.Fatal(err)
 	}
-	if freshMigrationCount != 3 {
-		t.Fatalf("fresh migration count = %d, want 3", freshMigrationCount)
+	if freshMigrationCount != 4 {
+		t.Fatalf("fresh migration count = %d, want 4", freshMigrationCount)
+	}
+}
+
+func TestGitBaselineSchema(t *testing.T) {
+	t.Parallel()
+
+	store := openTestStore(t, t.TempDir())
+	defer store.Close()
+	for _, column := range []string{"git_start_head", "git_start_head_exists"} {
+		var count int
+		if err := store.db.QueryRow(`
+			SELECT COUNT(*) FROM pragma_table_info('captures') WHERE name = ?`, column,
+		).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Errorf("captures column %q does not exist", column)
+		}
 	}
 }
 
@@ -241,7 +259,7 @@ func TestOpenRejectsFutureMigrationVersion(t *testing.T) {
 	store := openTestStore(t, home)
 	if _, err := store.db.Exec(
 		"INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
-		4, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		5, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Close(); err != nil {

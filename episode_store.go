@@ -107,6 +107,11 @@ func (s *Store) PublishEpisode(ctx context.Context, request PublishEpisodeReques
 		); err != nil {
 			return err
 		}
+		if _, err := transaction.ExecContext(
+			ctx, "DELETE FROM capture_git_baseline_paths WHERE capture_id = ?", capture.ID,
+		); err != nil {
+			return err
+		}
 
 		episode, err = loadEpisode(ctx, transaction, capture.RepositoryID, episodeID)
 		return err
