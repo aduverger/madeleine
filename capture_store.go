@@ -234,9 +234,7 @@ func (s *Store) SealCapture(ctx context.Context, request SealCaptureRequest) (Fi
 				return err
 			}
 			if nextStatus == CaptureStatusAbandoned {
-				if _, err := transaction.ExecContext(ctx,
-					"DELETE FROM capture_git_baseline_paths WHERE capture_id = ?", request.CaptureID,
-				); err != nil {
+				if err := deleteCaptureRawState(ctx, transaction, request.CaptureID); err != nil {
 					return err
 				}
 			}
@@ -279,12 +277,7 @@ func (s *Store) AbandonCapture(ctx context.Context, captureID CaptureID) error {
 		if err != nil {
 			return err
 		}
-		if _, err := transaction.ExecContext(ctx,
-			"DELETE FROM capture_paths WHERE capture_id = ?", captureID); err != nil {
-			return err
-		}
-		if _, err := transaction.ExecContext(ctx,
-			"DELETE FROM capture_git_baseline_paths WHERE capture_id = ?", captureID); err != nil {
+		if err := deleteCaptureRawState(ctx, transaction, captureID); err != nil {
 			return err
 		}
 		if nextStatus == status {
@@ -296,6 +289,16 @@ func (s *Store) AbandonCapture(ctx context.Context, captureID CaptureID) error {
 		return err
 	})
 	return wrapError("abandon capture", string(captureID), err)
+}
+
+func deleteCaptureRawState(ctx context.Context, transaction *sql.Tx, captureID CaptureID) error {
+	if _, err := transaction.ExecContext(ctx,
+		"DELETE FROM capture_paths WHERE capture_id = ?", captureID); err != nil {
+		return err
+	}
+	_, err := transaction.ExecContext(ctx,
+		"DELETE FROM capture_git_baseline_paths WHERE capture_id = ?", captureID)
+	return err
 }
 
 func insertCaptureGitBaseline(

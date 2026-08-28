@@ -102,14 +102,7 @@ func (s *Store) PublishEpisode(ctx context.Context, request PublishEpisodeReques
 		if updated != 1 {
 			return fmt.Errorf("%w: Capture changed during publication", ErrConflict)
 		}
-		if _, err := transaction.ExecContext(
-			ctx, "DELETE FROM capture_paths WHERE capture_id = ?", capture.ID,
-		); err != nil {
-			return err
-		}
-		if _, err := transaction.ExecContext(
-			ctx, "DELETE FROM capture_git_baseline_paths WHERE capture_id = ?", capture.ID,
-		); err != nil {
+		if err := deleteCaptureRawState(ctx, transaction, capture.ID); err != nil {
 			return err
 		}
 

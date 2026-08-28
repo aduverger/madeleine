@@ -50,21 +50,16 @@ func captureGitSnapshot(ctx context.Context, worktreeRoot string, additionalPath
 	if err != nil {
 		return gitSnapshot{}, err
 	}
-	porcelainByPath := make(map[string]string, len(statusEntries))
+	paths := make(map[string]gitPathSnapshot, len(statusEntries)+len(additionalPaths))
 	for _, entry := range statusEntries {
 		path, err := normalizeRepositoryPath(worktreeRoot, entry.Path)
 		if err != nil {
 			return gitSnapshot{}, fmt.Errorf("normalize Git status path %q: %w", entry.Path, err)
 		}
-		if _, duplicate := porcelainByPath[path]; duplicate {
+		if _, duplicate := paths[path]; duplicate {
 			return gitSnapshot{}, fmt.Errorf("Git status contains duplicate path %q", path)
 		}
-		porcelainByPath[path] = entry.PorcelainStatus
-	}
-
-	paths := make(map[string]gitPathSnapshot, len(porcelainByPath)+len(additionalPaths))
-	for path, status := range porcelainByPath {
-		paths[path] = gitPathSnapshot{PorcelainStatus: status}
+		paths[path] = gitPathSnapshot{PorcelainStatus: entry.PorcelainStatus}
 	}
 	for _, path := range additionalPaths {
 		normalized, err := normalizeRepositoryPath(worktreeRoot, path)
@@ -147,7 +142,7 @@ func parsePorcelainStatus(output []byte) ([]gitStatusEntry, error) {
 func parseIndexIdentities(output []byte) (map[string]string, error) {
 	identitiesByPath := make(map[string][]string)
 	for _, record := range splitNullRecords(output) {
-		tab := strings.IndexByte(string(record), '\t')
+		tab := bytes.IndexByte(record, '\t')
 		if tab < 0 {
 			return nil, fmt.Errorf("parse Git index: invalid stage record %q", record)
 		}
