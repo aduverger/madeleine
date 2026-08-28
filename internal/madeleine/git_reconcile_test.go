@@ -1,4 +1,4 @@
-package store
+package madeleine
 
 import (
 	"bytes"
@@ -364,7 +364,7 @@ type observableGitState struct {
 	indexInfo os.FileInfo
 }
 
-func newGitReconcileTest(t *testing.T, files map[string]string) (*Store, string) {
+func newGitReconcileTest(t *testing.T, files map[string]string) (*testService, string) {
 	t.Helper()
 	store := openTestStore(t, t.TempDir())
 	t.Cleanup(func() { _ = store.Close() })
@@ -393,7 +393,7 @@ func commitAllRepositoryFiles(t *testing.T, root, message string) {
 	git(t, root, "-c", "user.name=Madeleine Test", "-c", "user.email=test@example.com", "commit", "-m", message)
 }
 
-func sealWithoutMutatingGit(t *testing.T, store *Store, root string, captureID CaptureID) FinalizationDraft {
+func sealWithoutMutatingGit(t *testing.T, store *testService, root string, captureID CaptureID) FinalizationDraft {
 	t.Helper()
 	before := readObservableGitState(t, root)
 	draft, err := store.SealCapture(context.Background(), SealCaptureRequest{
@@ -477,7 +477,7 @@ func assertDraftPaths(t *testing.T, draft FinalizationDraft, want ...string) {
 	}
 }
 
-func assertBaselineRows(t *testing.T, store *Store, captureID CaptureID, want int) {
+func assertBaselineRows(t *testing.T, store *testService, captureID CaptureID, want int) {
 	t.Helper()
 	var got int
 	if err := store.db.QueryRow(

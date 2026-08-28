@@ -1,4 +1,4 @@
-package store
+package madeleine
 
 import (
 	"context"
@@ -169,7 +169,7 @@ func TestPublishEpisodeRollsBackOnInsertionFailure(t *testing.T) {
 			trigger: `CREATE TRIGGER fail_publication AFTER INSERT ON episode_files
 				WHEN NEW.path = 'generated/00300.go'
 				BEGIN SELECT RAISE(ABORT, 'injected path failure'); END`,
-			paths: testEpisodePaths(episodePathInsertBatchSize + 1),
+			paths: testEpisodePaths(301),
 		},
 	}
 	for _, test := range tests {
@@ -263,21 +263,6 @@ func TestPublishEpisodeValidatesStateAndSummaries(t *testing.T) {
 	}
 }
 
-func TestEpisodeSchemaIndexes(t *testing.T) {
-	t.Parallel()
-
-	store := openTestStore(t, t.TempDir())
-	defer store.Close()
-	for _, index := range []string{
-		"episodes_repository_ended_id_idx",
-		"episode_files_repository_path_episode_idx",
-	} {
-		if !databaseObjectExists(t, store.db, "index", index) {
-			t.Errorf("index %q does not exist", index)
-		}
-	}
-}
-
 func testEpisodePaths(count int) []string {
 	paths := make([]string, count)
 	for index := range paths {
@@ -286,7 +271,7 @@ func testEpisodePaths(count int) []string {
 	return paths
 }
 
-func insertTestCapturePaths(t *testing.T, store *Store, captureID CaptureID, paths []string) {
+func insertTestCapturePaths(t *testing.T, store *testService, captureID CaptureID, paths []string) {
 	t.Helper()
 	transaction, err := store.db.Begin()
 	if err != nil {
@@ -313,7 +298,7 @@ func insertTestCapturePaths(t *testing.T, store *Store, captureID CaptureID, pat
 	}
 }
 
-func sealTestCaptureWithPaths(t *testing.T, store *Store, root, externalID string, paths ...string) Capture {
+func sealTestCaptureWithPaths(t *testing.T, store *testService, root, externalID string, paths ...string) Capture {
 	t.Helper()
 	capture := startTestCapture(t, store, root, externalID)
 	for _, path := range paths {

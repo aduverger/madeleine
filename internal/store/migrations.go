@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 //go:embed migrations/*.sql
@@ -21,10 +22,10 @@ type migration struct {
 	sql     string
 }
 
-func migrateStore(ctx context.Context, db *sql.DB, source fs.FS) error {
+func migrate(ctx context.Context, db *sql.DB, source fs.FS) error {
 	migrations, err := loadMigrations(source)
 	if err != nil {
-		return wrapError("load store migrations", "", err)
+		return fmt.Errorf("load store migrations: %w", err)
 	}
 	latestVersion := migrations[len(migrations)-1].version
 
@@ -56,11 +57,11 @@ func migrateStore(ctx context.Context, db *sql.DB, source fs.FS) error {
 			}
 			_, err = transaction.ExecContext(ctx,
 				"INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
-				migration.version, utcTimestamp())
+				migration.version, timestamp(time.Now()))
 			return err
 		})
 		if err != nil {
-			return wrapError("apply store migration", migration.name, err)
+			return fmt.Errorf("apply store migration %q: %w", migration.name, err)
 		}
 	}
 	return nil
@@ -119,4 +120,18 @@ func readAppliedMigrationVersions(ctx context.Context, transaction *sql.Tx) (map
 		versions[version] = true
 	}
 	return versions, rows.Err()
+}
+
+func withImmediateTransaction(ctx context.Context, db *sql.DB, operation func(*sql.Tx) error) error {
+	transaction, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if err := operation(transaction); err != nil {
+		if rollbackErr := transaction.Rollback(); rollbackErr != nil {
+			return fmt.Errorf("%w; rollback: %v", err, rollbackErr)
+		}
+		return err
+	}
+	return transaction.Commit()
 }
