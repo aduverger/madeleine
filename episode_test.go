@@ -3,6 +3,7 @@ package madeleine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -79,6 +80,36 @@ func TestPublishEpisodeFinalizesCaptureAtomically(t *testing.T) {
 	}
 }
 
+func TestPublishEpisodeBatchesLargePathSets(t *testing.T) {
+	t.Parallel()
+
+	store := openTestStore(t, t.TempDir())
+	defer store.Close()
+	root := newTestGitRepository(t, "")
+	capture := startTestCapture(t, store, root, "large-publication")
+	paths := testEpisodePaths(11_000)
+	insertTestCapturePaths(t, store, capture.ID, paths)
+	if _, err := store.SealCapture(context.Background(), SealCaptureRequest{
+		CaptureID: capture.ID, EndCursor: "end",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	episode, err := store.PublishEpisode(context.Background(), PublishEpisodeRequest{
+		CaptureID: capture.ID, L1: "Large path set", L2: "Published in bounded batches.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(episode.Paths) != len(paths) {
+		t.Fatalf("Episode path count = %d, want %d", len(episode.Paths), len(paths))
+	}
+	if episode.Paths[0] != paths[0] || episode.Paths[len(episode.Paths)-1] != paths[len(paths)-1] {
+		t.Fatalf("Episode path bounds = %q/%q, want %q/%q",
+			episode.Paths[0], episode.Paths[len(episode.Paths)-1], paths[0], paths[len(paths)-1])
+	}
+}
+
 func TestPublishEpisodeRetriesAreIdempotent(t *testing.T) {
 	t.Parallel()
 
@@ -125,17 +156,20 @@ func TestPublishEpisodeRollsBackOnInsertionFailure(t *testing.T) {
 	tests := []struct {
 		name    string
 		trigger string
+		paths   []string
 	}{
 		{
 			name: "after Episode insertion",
 			trigger: `CREATE TRIGGER fail_publication AFTER INSERT ON episodes
 				BEGIN SELECT RAISE(ABORT, 'injected Episode failure'); END`,
+			paths: []string{"a.go", "z.go"},
 		},
 		{
-			name: "after path insertion",
+			name: "during second path batch",
 			trigger: `CREATE TRIGGER fail_publication AFTER INSERT ON episode_files
-				WHEN NEW.path = 'z.go'
+				WHEN NEW.path = 'generated/00300.go'
 				BEGIN SELECT RAISE(ABORT, 'injected path failure'); END`,
+			paths: testEpisodePaths(episodePathInsertBatchSize + 1),
 		},
 	}
 	for _, test := range tests {
@@ -143,7 +177,13 @@ func TestPublishEpisodeRollsBackOnInsertionFailure(t *testing.T) {
 			t.Parallel()
 			store := openTestStore(t, t.TempDir())
 			defer store.Close()
-			capture := sealTestCaptureWithPaths(t, store, newTestGitRepository(t, ""), test.name, "a.go", "z.go")
+			capture := startTestCapture(t, store, newTestGitRepository(t, ""), test.name)
+			insertTestCapturePaths(t, store, capture.ID, test.paths)
+			if _, err := store.SealCapture(context.Background(), SealCaptureRequest{
+				CaptureID: capture.ID, EndCursor: "end",
+			}); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := store.db.Exec(test.trigger); err != nil {
 				t.Fatal(err)
 			}
@@ -171,7 +211,7 @@ func TestPublishEpisodeRollsBackOnInsertionFailure(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if episodeCount != 0 || episodePathCount != 0 || capturePathCount != 2 {
+			if episodeCount != 0 || episodePathCount != 0 || capturePathCount != len(test.paths) {
 				t.Fatalf("row counts after rollback = Episodes %d, Episode paths %d, Capture paths %d", episodeCount, episodePathCount, capturePathCount)
 			}
 			if got.Status != CaptureStatusPendingSummary || got.EpisodeID != "" {
@@ -235,6 +275,41 @@ func TestEpisodeSchemaIndexes(t *testing.T) {
 		if !databaseObjectExists(t, store.db, "index", index) {
 			t.Errorf("index %q does not exist", index)
 		}
+	}
+}
+
+func testEpisodePaths(count int) []string {
+	paths := make([]string, count)
+	for index := range paths {
+		paths[index] = fmt.Sprintf("generated/%05d.go", index)
+	}
+	return paths
+}
+
+func insertTestCapturePaths(t *testing.T, store *Store, captureID CaptureID, paths []string) {
+	t.Helper()
+	transaction, err := store.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer transaction.Rollback()
+	statement, err := transaction.Prepare(`
+		INSERT INTO capture_paths(capture_id, path, source, first_seen_at, last_seen_at)
+		VALUES (?, ?, 'tool', ?, ?)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	timestamp := utcTimestamp()
+	for _, path := range paths {
+		if _, err := statement.Exec(captureID, path, timestamp, timestamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := statement.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := transaction.Commit(); err != nil {
+		t.Fatal(err)
 	}
 }
 

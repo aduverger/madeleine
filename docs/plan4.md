@@ -105,6 +105,8 @@ episode_files
 - [x] Publish a sealed Capture and assert all Episode fields and paths.
 - [x] Inject failures after Episode insertion and path insertion and assert full
   transaction rollback.
+- [x] Publish enough paths to require multiple bounded inserts.
+- [x] Fail during a later path batch and verify earlier batches roll back.
 - [x] Verify identical retry and conflicting retry behavior.
 - [x] Verify Capture raw paths disappear only after commit and the terminal row
   references the Episode.
@@ -120,10 +122,10 @@ episode_files
 
 Listed least-confident first:
 
-1. Exact paths are inserted in one multi-row SQLite statement. This satisfies
-   the requested batch insert and keeps publication atomic without a new bulk
-   abstraction. The MVP assumes one Capture remains below SQLite's bound-variable
-   limit; chunking is deferred until a measured workload requires it.
+1. Exact paths are inserted in batches of 300 rows, or 900 bound variables,
+   within the existing publication transaction. This remains below SQLite's
+   common variable limits, avoids imposing an undocumented Capture path cap,
+   and preserves all-or-nothing publication without a new storage abstraction.
 2. Leading and trailing Unicode whitespace is removed from L1 and L2 before
    validation and persistence. Retry equality compares these canonical stored
    values, so whitespace-only differences are idempotent rather than conflicts.

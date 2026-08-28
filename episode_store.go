@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+const episodePathInsertBatchSize = 300
+
 const episodeSelect = `
 	SELECT e.id, e.source_capture_id, e.repository_id, e.conversation_id,
 		conversation.external_id, e.harness, e.l1, e.l2, e.transcript_ref,
@@ -122,16 +124,21 @@ func insertEpisodePaths(
 	repositoryID RepositoryID,
 	paths []string,
 ) error {
-	placeholders := make([]string, len(paths))
-	arguments := make([]any, 0, len(paths)*3)
-	for index, path := range paths {
-		placeholders[index] = "(?, ?, ?)"
-		arguments = append(arguments, episodeID, repositoryID, path)
+	for start := 0; start < len(paths); start += episodePathInsertBatchSize {
+		batch := paths[start:min(start+episodePathInsertBatchSize, len(paths))]
+		placeholders := make([]string, len(batch))
+		arguments := make([]any, 0, len(batch)*3)
+		for index, path := range batch {
+			placeholders[index] = "(?, ?, ?)"
+			arguments = append(arguments, episodeID, repositoryID, path)
+		}
+		if _, err := transaction.ExecContext(ctx, `
+			INSERT INTO episode_files(episode_id, repository_id, path) VALUES `+
+			strings.Join(placeholders, ", "), arguments...); err != nil {
+			return err
+		}
 	}
-	_, err := transaction.ExecContext(ctx, `
-		INSERT INTO episode_files(episode_id, repository_id, path) VALUES `+
-		strings.Join(placeholders, ", "), arguments...)
-	return err
+	return nil
 }
 
 func loadEpisode(
