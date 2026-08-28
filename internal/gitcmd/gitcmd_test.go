@@ -63,6 +63,23 @@ exit 23
 	}
 }
 
+func TestRunUsesWorkingDirectoryInsteadOfInheritedGitOverrides(t *testing.T) {
+	executable := writeExecutable(t, `#!/bin/sh
+printf '%s|%s|%s' "${GIT_DIR-unset}" "${GIT_WORK_TREE-unset}" "${GIT_INDEX_FILE-unset}"
+`)
+	t.Setenv("GIT_DIR", "/wrong/git-dir")
+	t.Setenv("GIT_WORK_TREE", "/wrong/worktree")
+	t.Setenv("GIT_INDEX_FILE", "/wrong/index")
+
+	output, err := Run(context.Background(), executable, t.TempDir(), []string{"status"}, time.Second)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got, want := string(output), "unset|unset|unset"; got != want {
+		t.Fatalf("repository override environment = %q, want %q", got, want)
+	}
+}
+
 func TestRunAppliesTimeout(t *testing.T) {
 	t.Parallel()
 

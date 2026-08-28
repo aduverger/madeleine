@@ -30,6 +30,10 @@ func (s *Store) StartCapture(ctx context.Context, request StartCaptureRequest) (
 	if err != nil {
 		return Capture{}, err
 	}
+	gitBaseline, err := captureGitSnapshot(ctx, repository.WorktreeRoot, nil)
+	if err != nil {
+		return Capture{}, wrapError("start capture", request.RepositoryRoot, err)
+	}
 	conversationID, err := s.getOrCreateConversation(
 		ctx, repository.ID, request.ConversationKey, request.TranscriptRef,
 	)
@@ -56,14 +60,20 @@ func (s *Store) StartCapture(ctx context.Context, request StartCaptureRequest) (
 		}
 
 		transcriptRef := sql.NullString{String: request.TranscriptRef, Valid: request.TranscriptRef != ""}
+		gitStartHead := sql.NullString{String: gitBaseline.Head, Valid: gitBaseline.HeadExists}
 		_, err = transaction.ExecContext(ctx, `
 			INSERT INTO captures(
 				id, conversation_id, repository_id, worktree_root, status,
-				transcript_ref, start_cursor, started_at, last_seen_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				transcript_ref, start_cursor, started_at, last_seen_at,
+				git_start_head, git_start_head_exists
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			captureID, conversationID, repository.ID, repository.WorktreeRoot,
-			CaptureStatusOpen, transcriptRef, request.StartCursor, now, now)
-		return err
+			CaptureStatusOpen, transcriptRef, request.StartCursor, now, now,
+			gitStartHead, gitBaseline.HeadExists)
+		if err != nil {
+			return err
+		}
+		return insertCaptureGitBaseline(ctx, transaction, captureID, gitBaseline.Paths)
 	})
 	if err != nil {
 		return Capture{}, wrapError("start capture", request.RepositoryRoot, err)
@@ -182,8 +192,13 @@ func (s *Store) SealCapture(ctx context.Context, request SealCaptureRequest) (Fi
 		return FinalizationDraft{}, wrapError("seal capture", string(request.CaptureID), ErrInvalidState)
 	}
 
+	gitPaths, err := s.reconcileCaptureGitPaths(ctx, request.CaptureID)
+	if err != nil {
+		return FinalizationDraft{}, wrapError("seal capture", string(request.CaptureID), err)
+	}
+
 	var draft FinalizationDraft
-	err := withImmediateTransaction(ctx, s.db, func(transaction *sql.Tx) error {
+	err = withImmediateTransaction(ctx, s.db, func(transaction *sql.Tx) error {
 		var status CaptureStatus
 		var episodeID sql.NullString
 		err := transaction.QueryRowContext(ctx,
@@ -196,6 +211,11 @@ func (s *Store) SealCapture(ctx context.Context, request SealCaptureRequest) (Fi
 			return err
 		}
 
+		if status == CaptureStatusOpen {
+			if err := insertGitCapturePaths(ctx, transaction, request.CaptureID, gitPaths); err != nil {
+				return err
+			}
+		}
 		paths, err := capturePaths(ctx, transaction, request.CaptureID)
 		if err != nil {
 			return err
@@ -212,6 +232,11 @@ func (s *Store) SealCapture(ctx context.Context, request SealCaptureRequest) (Fi
 				WHERE id = ? AND status = ?`,
 				nextStatus, request.EndCursor, endedAt, request.CaptureID, CaptureStatusOpen); err != nil {
 				return err
+			}
+			if nextStatus == CaptureStatusAbandoned {
+				if err := deleteCaptureRawState(ctx, transaction, request.CaptureID); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -252,12 +277,11 @@ func (s *Store) AbandonCapture(ctx context.Context, captureID CaptureID) error {
 		if err != nil {
 			return err
 		}
+		if err := deleteCaptureRawState(ctx, transaction, captureID); err != nil {
+			return err
+		}
 		if nextStatus == status {
 			return nil
-		}
-		if _, err := transaction.ExecContext(ctx,
-			"DELETE FROM capture_paths WHERE capture_id = ?", captureID); err != nil {
-			return err
 		}
 		_, err = transaction.ExecContext(ctx, `
 			UPDATE captures SET status = ?, ended_at = COALESCE(ended_at, ?) WHERE id = ?`,
@@ -265,6 +289,55 @@ func (s *Store) AbandonCapture(ctx context.Context, captureID CaptureID) error {
 		return err
 	})
 	return wrapError("abandon capture", string(captureID), err)
+}
+
+func deleteCaptureRawState(ctx context.Context, transaction *sql.Tx, captureID CaptureID) error {
+	if _, err := transaction.ExecContext(ctx,
+		"DELETE FROM capture_paths WHERE capture_id = ?", captureID); err != nil {
+		return err
+	}
+	_, err := transaction.ExecContext(ctx,
+		"DELETE FROM capture_git_baseline_paths WHERE capture_id = ?", captureID)
+	return err
+}
+
+func insertCaptureGitBaseline(
+	ctx context.Context,
+	transaction *sql.Tx,
+	captureID CaptureID,
+	paths map[string]gitPathSnapshot,
+) error {
+	for path, snapshot := range paths {
+		indexIdentity := sql.NullString{String: snapshot.IndexIdentity, Valid: snapshot.IndexIdentity != ""}
+		if _, err := transaction.ExecContext(ctx, `
+			INSERT INTO capture_git_baseline_paths(
+				capture_id, path, porcelain_status, worktree_fingerprint, index_identity
+			) VALUES (?, ?, ?, ?, ?)`,
+			captureID, path, snapshot.PorcelainStatus,
+			snapshot.WorktreeFingerprint, indexIdentity); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func insertGitCapturePaths(
+	ctx context.Context,
+	transaction *sql.Tx,
+	captureID CaptureID,
+	paths []string,
+) error {
+	now := utcTimestamp()
+	for _, path := range paths {
+		if _, err := transaction.ExecContext(ctx, `
+			INSERT INTO capture_paths(capture_id, path, source, first_seen_at, last_seen_at)
+			VALUES (?, ?, 'git', ?, ?)
+			ON CONFLICT(capture_id, path) DO NOTHING`,
+			captureID, path, now, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func capturePaths(ctx context.Context, transaction *sql.Tx, captureID CaptureID) ([]string, error) {

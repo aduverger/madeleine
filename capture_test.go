@@ -394,7 +394,7 @@ func TestSealCaptureOrdersPathsAndIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestSealBeforeGitReconciliationIgnoresUnrecordedChanges(t *testing.T) {
+func TestSealCaptureReconcilesUnrecordedGitChanges(t *testing.T) {
 	t.Parallel()
 
 	store := openTestStore(t, t.TempDir())
@@ -411,8 +411,9 @@ func TestSealBeforeGitReconciliationIgnoresUnrecordedChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !draft.Empty || draft.Status != CaptureStatusAbandoned {
-		t.Fatalf("draft = %#v, want empty abandoned Capture", draft)
+	if draft.Empty || draft.Status != CaptureStatusPendingSummary ||
+		!reflect.DeepEqual(draft.Paths, []string{"shell-created.go"}) {
+		t.Fatalf("draft = %#v, want pending Capture with shell-created.go", draft)
 	}
 }
 
