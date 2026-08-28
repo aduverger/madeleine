@@ -1,4 +1,4 @@
-# Plan 3: Live Capture state machine
+# Plan 3: Capture state machine
 
 PR scope: one PR  
 Depends on: `plan2.md`  
@@ -169,13 +169,17 @@ Listed least-confident first:
 10. Before Plan 5, filesystem or shell-only changes are intentionally invisible.
    A dedicated test creates an unrecorded file and confirms sealing abandons the
    Capture; only successful `RecordWrite` paths can keep it pending in this PR.
+11. Terminology was clarified after implementation: Capture and Episode are the
+   domain entities; `live` and `history` are descriptions, not parallel models.
+   This changes documentation only and leaves the schema, API, and state machine
+   unchanged.
 
 ## Acceptance criteria
 
 - [x] A process can crash after `RecordWrite`, reopen the Store, and recover the
   open Capture and its paths.
-- [x] Live paths contain no reads, summaries, transcript bodies, or Pi-specific
-  tool payloads.
+- [x] Capture paths contain no reads, summaries, transcript bodies, or
+  Pi-specific tool payloads.
 - [x] Only one open Capture can exist for a Conversation.
 - [x] All prior migrations and tests continue to pass.
 

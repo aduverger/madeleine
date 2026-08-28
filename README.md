@@ -43,21 +43,23 @@ memory database.
 
 ## Simple primitives
 
-Madeleine is built around two views of agent work:
-
-| History | Live |
-|---|---|
-| Finalized and durable | Unfinished and operational |
-| Explains what happened and why | Records what is happening now |
-| Episodes linked to exact paths | Captures linked to modified paths |
-| Contains L1/L2 summaries | Contains raw activity and timestamps |
-
-Three small domain objects connect them:
+Madeleine uses three domain objects:
 
 - **Conversation** — a harness-owned thread, such as a Pi session.
-- **Capture** — durable state for one unfinished interval of work.
-- **Episode** — an immutable historical record produced when a Capture is
-  finalized.
+- **Capture** — durable operational state for one unfinished interval of work.
+- **Episode** — an immutable historical record produced from a finalized
+  Capture.
+
+Their responsibilities remain separate:
+
+| Unfinished Capture | Published Episode |
+|---|---|
+| Records what is happening now | Explains what happened and why |
+| Stores modified paths and activity timestamps | Stores exact paths and L1/L2 summaries |
+| Mutable while work is in progress | Immutable after publication |
+
+`live` and `history` are descriptions of lifecycle state, not additional domain
+objects or storage layers.
 
 For the Pi MVP, one Pi runtime produces one Episode. Resuming the same
 Conversation starts a new Capture rather than extending old history. This keeps
@@ -66,7 +68,7 @@ workflows.
 
 ## Progressive context
 
-History is disclosed in layers:
+Episode context is disclosed in layers:
 
 1. **L1** — one or two sentences, attached automatically when a file is read.
 2. **L2** — a longer brief containing goals, decisions, rationale, actions,
@@ -83,7 +85,7 @@ More elaborated ranking mechanisms will be explored in the future.
 ```text
 agent run starts
     ↓
-Live Capture stores successful file writes
+Capture stores successful file writes
     ↓
 Git reconciliation catches shell tools, generators, and commits
     ↓
@@ -91,10 +93,10 @@ Capture is sealed
     ↓
 L1 and L2 are generated from the bounded conversation interval
     ↓
-immutable Episode is published to History
+immutable Episode is published
 ```
 
-Live writes make unfinished work recoverable after a crash. A resumed run gets a
+Persisted Capture paths make unfinished work recoverable after a crash. A resumed run gets a
 new Capture immediately, while older pending Captures are finalized in the
 background.
 
@@ -148,7 +150,7 @@ These are not rejected forever. We want to focus first on validating file-level 
 Pi extension
     ↓ versioned JSON over stdin/stdout
 Madeleine Go library and CLI
-    ├── SQLite: Captures, Episodes, exact-path History
+    ├── SQLite: Captures, Episodes, and exact-path Episode index
     └── system Git: repository identity and final reconciliation
 ```
 
@@ -166,7 +168,7 @@ Likely next steps are:
 3. Derive folder history and follow Git renames when exact paths prove limiting.
 4. Add range or symbol context only for repositories where large hotspot files
    create measurable noise.
-5. Expose Live activity to orchestrators for multi-agent awareness.
+5. Expose active Capture activity to orchestrators for multi-agent awareness.
 6. Add Agent Trace import/export as an interoperability layer, not an internal
    storage model.
 

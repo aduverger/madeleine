@@ -1,4 +1,4 @@
-# Plan 4: Episode publication and exact-path History
+# Plan 4: Episode publication and exact-path retrieval
 
 PR scope: one PR  
 Depends on: `plan3.md`  
@@ -6,9 +6,9 @@ Design decisions: D-001, D-002, D-003, D-004, D-005, D-012, D-021
 
 ## Goal
 
-Turn a sealed Capture into immutable History and implement the two core read
-questions: "which Episodes changed this path?" and "what is the full L2 for this
-Episode?"
+Publish a sealed Capture as an immutable Episode and implement the two core
+read questions: "which Episodes changed this path?" and "what is the full L2
+for this Episode?"
 
 ## Entire reuse gate
 
@@ -86,7 +86,7 @@ episode_files
 - [ ] For each path, return at most five Episode summaries ordered by
   `ended_at DESC, id DESC`.
 - [ ] Each summary includes Episode ID, ended time, harness, and L1.
-- [ ] Return an empty Episode slice for a valid path with no history.
+- [ ] Return an empty Episode slice for a valid path with no matching Episodes.
 - [ ] Do not perform prefix, fuzzy, rename, semantic, or cross-repository lookup.
 
 ## Episode detail
@@ -116,7 +116,7 @@ episode_files
 
 ## Acceptance criteria
 
-- [ ] History publication is atomic and safe to retry after an unknown client
+- [ ] Episode publication is atomic and safe to retry after an unknown client
   outcome.
 - [ ] The hot lookup is one indexed relational query without relevance scoring.
 - [ ] Episode detail never returns data from another Repository.

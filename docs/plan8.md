@@ -1,4 +1,4 @@
-# Plan 8: Pi Live Capture lifecycle
+# Plan 8: Pi Capture lifecycle
 
 PR scope: one PR  
 Depends on: `plan7.md`  
@@ -6,8 +6,8 @@ Design decisions: D-004, D-005, D-006, D-007, D-011, D-014, D-016, D-021
 
 ## Goal
 
-Connect Pi lifecycle and successful mutation events to Live Captures. Preserve
-one Capture across `/reload`, create new Captures for distinct runs, and expose
+Connect Pi lifecycle and successful mutation events to Captures. Preserve one
+Capture across `/reload`, create new Captures for distinct runs, and expose
 operational status/abandon commands. Episode summarization starts in Plan 9.
 
 ## Entire reuse gate
@@ -140,4 +140,4 @@ Register one Pi command, `/madeleine`, and parse these strict subcommands:
 ## Excluded from this PR
 
 Model summarization, Episode publication, automatic stale-Capture recovery, and
-multi-agent Live display.
+multi-agent Capture activity display.

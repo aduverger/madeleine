@@ -39,9 +39,9 @@ existing view of current code and Git history.
 4. **File level is sufficient to test the thesis.** Function, range, symbol,
    folder, and rename identity are deferred until real usage demonstrates that
    file-level context is too noisy.
-5. **Facts and summaries have different lifecycles.** Live state records raw
-   activity while work is unfinished. History contains a distilled, immutable
-   Episode after finalization.
+5. **Facts and summaries have different lifecycles.** A Capture records raw
+   activity while work is unfinished. An Episode contains the distilled,
+   immutable result after publication.
 6. **Harnesses deliver context; the core owns semantics.** Pi is the first
    complete adapter, not the definition of Madeleine's domain model.
 7. **Fail open.** Failure to find the binary, query SQLite, inspect Git, or call
@@ -79,6 +79,10 @@ deliberate conclusion after inspection, not the default starting point.
 
 ## Domain model
 
+Repository, Conversation, Capture, and Episode are the domain nouns. `live` and
+`history` describe lifecycle state and product behavior; they are not additional
+types, stores, or persistence models.
+
 ### Repository
 
 A Git repository known to Madeleine. It has a generated stable ID and one or
@@ -110,9 +114,9 @@ open -> pending_summary -> finalized
    -> abandoned
 ```
 
-Only `open` and `pending_summary` Captures are Live. Terminal Capture rows are
-retained as small idempotency records, while their raw paths are removed after
-successful Episode publication.
+Only `open` and `pending_summary` Captures are unfinished and recoverable.
+Terminal Capture rows are retained as small idempotency records, while their raw
+paths are removed after successful Episode publication.
 
 ### Episode
 
@@ -129,13 +133,13 @@ chooses the simple policy that one clean Pi runtime/run produces one Episode.
 This permits future checkpoint Episodes or multiple Episodes in a long-running
 Conversation without changing the model.
 
-### History and Live
+### Capture and Episode lifecycle
 
-History and Live are the two foundational views:
+The two persistence stages have distinct responsibilities:
 
 ```text
-History                                  Live
-durable, semantic                        operational, unfinished
+Published Episode                        Unfinished Capture
+durable, semantic                        operational, recoverable
 Episode <-> paths                        Capture <-> paths
 L1 / L2                                  first/last activity
 transcript reference                     transcript cursors
@@ -144,13 +148,13 @@ append-oriented                          tiny upserts
 
 The invariant is:
 
-> Live contains facts while work is happening. History contains the distilled
-> record once the work is done.
+> A Capture contains facts while work is happening. An Episode contains the
+> distilled historical record once publication succeeds.
 
-Live is not coordination intelligence. In a later multiplayer system it may
-expose facts such as "Capture A is writing foo.go". An orchestrator, not the
-Madeleine core, decides whether another agent should warn, wait, communicate,
-or ignore that fact.
+Active Capture activity is factual, not coordination intelligence. In a later
+multiplayer system it may expose facts such as "Capture A is writing foo.go".
+An orchestrator, not the Madeleine core, decides whether another agent should
+warn, wait, communicate, or ignore that fact.
 
 ## Lifecycle
 
@@ -259,8 +263,8 @@ Successful Pi `edit` and `write` results are the primary source. A failed tool
 call never records a path. The first successful mutation of a path is persisted
 immediately; repeat touches refresh `last_seen_at` at most every 30 seconds.
 
-Reads are retrieval keys only. They are not stored as historical or Live
-activity in the MVP.
+Reads are retrieval keys only. They are not stored as Capture activity or
+Episode history in the MVP.
 
 ### Git reconciliation
 
@@ -349,7 +353,8 @@ episode_files
 
 `capture_paths` uses independently owned `(capture_id, path)` rows. Multiple
 agents touching one path therefore do not mutate one shared aggregate row.
-History is likewise append-oriented through `(episode_id, path)` relationships.
+Episode paths are likewise append-oriented through `(episode_id, path)`
+relationships.
 
 SQLite is canonical for the MVP. There is no duplicate canonical JSON record,
 rebuildable materialized index, or per-session journal file. Export formats can
@@ -462,7 +467,7 @@ The MVP is complete when the Pi vertical slice proves all of the following:
 - copied transcript storage or transcript parsing for old external histories;
 - Claude, Codex, Cursor, Gemini, OpenCode, or other harness adapters;
 - Agent Trace or Git AI import/export;
-- live read presence or multi-agent steering UI;
+- real-time read presence or multi-agent steering UI;
 - daemon, socket service, network API, Postgres, replication, or team sharing;
 - web UI, MCP server, commit attribution, or line-survival tracking;
 - configurable storage backends or summarizer-provider abstraction.
@@ -480,7 +485,7 @@ Future work is driven by dogfooding and measurements:
 6. Evolve context selection from newest-first using observed signals such as
    changed-line count, Episode creation, or survival; never let embeddings
    establish causal provenance.
-7. Expose Live write/read activity to orchestrators for same-machine agent
+7. Expose active Capture activity to orchestrators for same-machine agent
    coordination.
 8. Add a single-writer local broker only after SQLite contention is measured.
 9. Add PostgreSQL and authenticated sharing when activity spans machines.
@@ -526,8 +531,8 @@ necessary MVP capability. SQLite alone is sufficient and exportable later.
 ### Per-session journal files
 
 Private journals reduce write contention but introduce another state machine and
-recovery source. Live Capture rows in SQLite already provide crash durability
-with tiny upserts.
+recovery source. Unfinished Capture rows in SQLite already provide crash
+durability with tiny upserts.
 
 ### Alternative embedded databases
 
@@ -550,7 +555,7 @@ reference boundary.
 | D-002 | MVP granularity is exact file path. | Locked | No symbols, ranges, folders, or rename identity. |
 | D-003 | Use one Episode-level L1/L2 plus raw transcript reference. | Locked | No per-file summaries and no generated L3. |
 | D-004 | Separate Conversation, Capture, and Episode. | Locked | Harness resumes do not overload the historical unit. |
-| D-005 | History is durable semantics; Live is unfinished facts. | Locked | Live can later support presence without defining orchestration policy. |
+| D-005 | Keep unfinished Capture facts separate from immutable Episode history. | Locked | Capture activity can later support presence without defining orchestration policy. |
 | D-006 | One Pi runtime/run produces one Episode. | MVP policy | Future checkpoints remain possible without a core migration. |
 | D-007 | Persist successful writes during the run. | Locked | Crashes retain useful Capture state. Reads are not persisted. |
 | D-008 | SQLite WAL is the sole MVP persistence layer. | Locked | No canonical JSON, journal files, daemon, or alternate backend. |
