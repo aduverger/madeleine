@@ -76,8 +76,9 @@ is deleted when the Capture becomes finalized or abandoned.
 - [x] Capture the end HEAD and end porcelain state using the same parser.
 - [x] If both start and end HEAD exist and differ, use
   `git diff --name-only -z --no-renames <start>..<end>`.
-- [x] If either HEAD is unborn, rely on status/baseline comparison rather than
-  inventing a commit range.
+- [x] If exactly one HEAD is unborn, treat it as an empty committed tree and
+  enumerate the existing HEAD with read-only `git ls-tree`; if both are unborn,
+  rely on status/baseline comparison.
 - [x] Include every path newly present in end status.
 - [x] For paths dirty at start, include the path when porcelain state,
   worktree fingerprint, or index identity differs at seal.
@@ -112,6 +113,8 @@ Git status/index/HEAD are unchanged by observation.
 - [x] Commit created during Capture with a clean worktree at seal.
 - [x] Several commits and a changed end branch.
 - [x] Unborn repository with untracked files.
+- [x] First commit created from an unborn start with a clean worktree at seal.
+- [x] Populated start HEAD changed to a clean unborn/orphan branch.
 - [x] Rename represented as old-path deletion plus new-path addition.
 - [x] Structured write that Git also sees appears only once and keeps tool
   provenance.
@@ -161,7 +164,11 @@ Listed least-confident first:
    equivalent SQLite transaction, so its checkpoint store, go-git status walk,
    and object-writing code were not reused. `NOTICE` now records this commit and
    retains Entire's MIT license text.
-10. Local verification passed with `make check`, `go test -race ./...`, and
+10. Review clarified the one-HEAD case: the missing HEAD is an empty committed
+    tree, so the existing endpoint's paths are included with `git ls-tree`.
+    This symmetric rule covers both a normal first commit and the rarer move to
+    a clean unborn/orphan branch without special lifecycle handling.
+11. Local verification passed with `make check`, `go test -race ./...`, and
     `git diff --check`. The integration suite compares HEAD, porcelain status,
     index bytes, index file identity, and index modification time immediately
     before and after Git observation.

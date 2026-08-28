@@ -102,7 +102,7 @@ func TestGitReconciliation(t *testing.T) {
 		assertDraftPaths(t, draft, "first.txt", "second.txt")
 	})
 
-	t.Run("unborn repository", func(t *testing.T) {
+	t.Run("unborn repository with untracked file", func(t *testing.T) {
 		store := openTestStore(t, t.TempDir())
 		t.Cleanup(func() { _ = store.Close() })
 		root := newTestGitRepository(t, "")
@@ -111,6 +111,32 @@ func TestGitReconciliation(t *testing.T) {
 
 		draft := sealWithoutMutatingGit(t, store, root, capture.ID)
 		assertDraftPaths(t, draft, "first.txt")
+	})
+
+	t.Run("first commit from unborn repository", func(t *testing.T) {
+		store := openTestStore(t, t.TempDir())
+		t.Cleanup(func() { _ = store.Close() })
+		root := newTestGitRepository(t, "")
+		capture := startTestCapture(t, store, root, "first-commit")
+		writeRepositoryFile(t, root, "first.txt", "first\n")
+		writeRepositoryFile(t, root, "nested/second.txt", "second\n")
+		commitAllRepositoryFiles(t, root, "first")
+
+		draft := sealWithoutMutatingGit(t, store, root, capture.ID)
+		assertDraftPaths(t, draft, "first.txt", "nested/second.txt")
+	})
+
+	t.Run("populated HEAD to clean unborn branch", func(t *testing.T) {
+		store, root := newGitReconcileTest(t, map[string]string{
+			"first.txt":         "first\n",
+			"nested/second.txt": "second\n",
+		})
+		capture := startTestCapture(t, store, root, "orphan")
+		git(t, root, "checkout", "--orphan", "empty-history")
+		git(t, root, "rm", "-rf", ".")
+
+		draft := sealWithoutMutatingGit(t, store, root, capture.ID)
+		assertDraftPaths(t, draft, "first.txt", "nested/second.txt")
 	})
 
 	t.Run("rename is deletion and addition", func(t *testing.T) {
