@@ -105,7 +105,7 @@ background.
 The first complete integration targets [Pi](https://github.com/earendil-works/pi).
 It will provide:
 
-- a reusable Go library and a small JSON CLI;
+- a standalone Go CLI with a versioned JSON protocol;
 - local SQLite storage in WAL mode;
 - a thin Pi TypeScript extension;
 - automatic L1 context after successful file reads;
@@ -149,8 +149,8 @@ These are not rejected forever. We want to focus first on validating file-level 
 ```text
 Pi extension
     ↓ versioned JSON over stdin/stdout
-Madeleine Go library and CLI
-    ├── SQLite: Captures, Episodes, and exact-path Episode index
+Madeleine CLI
+    ├── private Go application and SQLite Store
     └── system Git: repository identity and final reconciliation
 ```
 
@@ -176,7 +176,7 @@ Likely next steps are:
 
 - [`design.md`](./docs/design.md) contains the philosophy, accepted decisions,
   lifecycle, interfaces, MVP boundaries, and rejected alternatives.
-- [`plan1.md`](./docs/plan1.md) through [`plan10.md`](./docs/plan10.md) form the
+- [`plan1.md`](./docs/plan1.md) through [`plan11.md`](./docs/plan11.md) form the
   stacked implementation plan, with one reviewable pull request per file.
 
 ## License

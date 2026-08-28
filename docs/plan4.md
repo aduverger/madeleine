@@ -4,6 +4,10 @@ PR scope: one PR
 Depends on: `plan3.md`  
 Design decisions: D-001, D-002, D-003, D-004, D-005, D-012, D-021
 
+> Historical note: paths and public-package references describe the merged PR.
+> Plan 6 later internalizes the Go implementation when Madeleine becomes a
+> standalone application.
+
 ## Goal
 
 Publish a sealed Capture as an immutable Episode and implement the two core
