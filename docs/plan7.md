@@ -72,8 +72,7 @@ episode.get
 - [ ] Require one JSON object on stdin for every RPC call.
 - [ ] Require `protocol_version: 1` in each request.
 - [ ] Reuse the `internal/madeleine` request/result structs under a thin RPC
-  envelope; do not
-  define a second domain model.
+  envelope; do not define a second domain model.
 - [ ] Reject trailing non-whitespace after the request object.
 - [ ] Emit exactly one compact JSON object followed by `\n`.
 - [ ] Success envelope:
@@ -92,10 +91,10 @@ episode.get
   encode a protocol response; report that case on stderr.
 - [ ] Add no ANSI color when stdout is JSON.
 
-## Environment and Store initialization
+## Environment and Service initialization
 
 - [ ] Resolve `MADELEINE_HOME` in the CLI and pass it through `Options.Home`.
-- [ ] Open one Store per invocation and close it after encoding the result.
+- [ ] Open one Service per invocation and close it after encoding the result.
 - [ ] Treat an empty `MADELEINE_HOME` as unset.
 - [ ] Do not add config files, global flags for alternate databases, or daemon
   discovery.
@@ -119,9 +118,9 @@ episode.get
 
 - [ ] `version` prints the semantic version plus optional build commit using
   build variables that default to `dev` and `unknown`.
-- [ ] `doctor` checks binary version, data directory access, Store open and
-  schema version, Git executable availability, and Repository resolution when
-  `--repo` or the current directory is supplied.
+- [ ] `doctor` checks binary version, data directory access, application
+  initialization and schema version, Git executable availability, and Repository
+  resolution when `--repo` or the current directory is supplied.
 - [ ] Human doctor output gives one line per check and exits nonzero if a
   required check fails.
 - [ ] `doctor --json` uses the protocol envelope and returns structured checks.

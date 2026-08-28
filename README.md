@@ -126,7 +126,7 @@ Madeleine is deliberately small, but it is not built in isolation. The
 reference for mechanics it has already solved, including agent lifecycles, Git
 integration, session capture, recovery, and cross-platform behavior.
 
-When Entire code or tests fit Madeleine's semantics, we prefer adapting them to
+When Entire code or tests fit Madeleine's semantics, we prefer adapting them over
 writing another implementation. Madeleine still owns its smaller domain model
 and avoids importing unrelated architecture. Reused work keeps its required
 attribution and provenance.

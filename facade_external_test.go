@@ -62,8 +62,11 @@ func TestPublicStoreFacade(t *testing.T) {
 	pending, err := store.ListPendingCaptures(ctx, madeleine.PendingCaptureQuery{
 		RepositoryRoot: root, ConversationKey: &key,
 	})
-	if err != nil || len(pending) != 1 || pending[0].ID != capture.ID {
-		t.Fatalf("pending Captures = %#v, error = %v", pending, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 || pending[0].ID != capture.ID {
+		t.Fatalf("pending Captures = %#v", pending)
 	}
 
 	draft, err := store.SealCapture(ctx, madeleine.SealCaptureRequest{CaptureID: capture.ID, EndCursor: "end"})

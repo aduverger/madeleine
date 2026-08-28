@@ -65,7 +65,7 @@ extensions/madeleine/*.test.ts
 
 - [ ] During the first session event, run `madeleine doctor --json --repo cwd`.
 - [ ] Cache enabled/disabled state for the extension runtime.
-- [ ] If binary, Store, or Repository checks fail, disable Madeleine for that
+- [ ] If binary, database, or Repository checks fail, disable Madeleine for that
   run and notify at most once when UI exists.
 - [ ] Never prompt for installation or modify Pi settings automatically.
 
@@ -99,7 +99,7 @@ Use the madeleine_episode tool with an episode_id for the longer brief.
 
 - [ ] Escape stored path/text so it cannot close the wrapper or impersonate a
   higher-trust message.
-- [ ] Preserve the Store's newest-first order and five-item limit.
+- [ ] Preserve Madeleine's newest-first order and five-item limit.
 - [ ] Do not add another relevance score or token-based reranker.
 
 ## L2 tool
