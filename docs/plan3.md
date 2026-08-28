@@ -1,4 +1,4 @@
-# Plan 3: Live Capture state machine
+# Plan 3: Capture state machine
 
 PR scope: one PR  
 Depends on: `plan2.md`  
@@ -12,12 +12,12 @@ state machine. Until Plan 5, sealing uses only structured paths recorded through
 
 ## Entire reuse gate
 
-- [ ] Inspect the relevant `entireio/cli` implementation and tests before
+- [x] Inspect the relevant `entireio/cli` implementation and tests before
   coding this PR.
-- [ ] Prefer copying or adapting compatible mechanics to reimplementation;
+- [x] Prefer copying or adapting compatible mechanics to reimplementation;
   Madeleine's interfaces and invariants remain authoritative.
-- [ ] Record reused upstream paths and commit, and retain required attribution.
-- [ ] If equivalent code is not reused, record the concrete mismatch in the PR.
+- [x] Record reused upstream paths and commit, and retain required attribution.
+- [x] If equivalent code is not reused, record the concrete mismatch in the PR.
 
 ## Files
 
@@ -26,6 +26,8 @@ capture.go
 capture_store.go
 migrations/002_captures.sql
 capture_test.go
+api_external_test.go
+store_test.go
 ```
 
 ## Schema
@@ -56,75 +58,130 @@ capture_paths
   PRIMARY KEY(capture_id, path)
 ```
 
-- [ ] Add a partial unique index permitting at most one `open` Capture per
+- [x] Add a partial unique index permitting at most one `open` Capture per
   Conversation.
-- [ ] Add indexes for pending Capture lookup by Repository, Conversation,
+- [x] Add indexes for pending Capture lookup by Repository, Conversation,
   status, and start time.
-- [ ] Keep terminal Capture rows; do not add a TTL or cleanup job.
+- [x] Keep terminal Capture rows; do not add a TTL or cleanup job.
 
 ## Start and get
 
-- [ ] `StartCapture` resolves/persists the Repository and Conversation before
+- [x] `StartCapture` resolves/persists the Repository and Conversation before
   opening its insertion transaction.
-- [ ] Generate a Capture ID and store the current worktree root, transcript
+- [x] Generate a Capture ID and store the current worktree root, transcript
   reference, start cursor, and Store-assigned UTC time.
-- [ ] Return `ErrConflict` when the Conversation already has an open Capture.
-- [ ] `GetCapture` returns state and boundaries but not raw internal SQL rows.
+- [x] Return `ErrConflict` when the Conversation already has an open Capture.
+- [x] `GetCapture` returns state and boundaries but not raw internal SQL rows.
 
 ## Record write
 
-- [ ] Resolve the Capture and require `status=open`.
-- [ ] Normalize the supplied path against the Capture's stored worktree root.
-- [ ] Upsert `(capture_id, path)` with source `tool`, preserving
+- [x] Resolve the Capture and require `status=open`.
+- [x] Normalize the supplied path against the Capture's stored worktree root.
+- [x] Upsert `(capture_id, path)` with source `tool`, preserving
   `first_seen_at` and updating `last_seen_at`.
-- [ ] Update Capture `last_seen_at` in the same transaction.
-- [ ] Reject writes to sealed, finalized, or abandoned Captures with
+- [x] Update Capture `last_seen_at` in the same transaction.
+- [x] Reject writes to sealed, finalized, or abandoned Captures with
   `ErrInvalidState`.
-- [ ] Make duplicate calls safe under concurrent processes.
+- [x] Make duplicate calls safe under concurrent processes.
 
 ## List pending and seal
 
-- [ ] `ListPendingCaptures` filters by resolved Repository and optionally by
+- [x] `ListPendingCaptures` filters by resolved Repository and optionally by
   Conversation, returning `open` and `pending_summary` oldest-first.
-- [ ] `SealCapture` requires an end cursor and executes one state transaction.
-- [ ] Freeze the current distinct path set in lexical order.
-- [ ] If the set is empty, set `ended_at`, transition to `abandoned`, and return
+- [x] `SealCapture` requires an end cursor and executes one state transaction.
+- [x] Freeze the current distinct path set in lexical order.
+- [x] If the set is empty, set `ended_at`, transition to `abandoned`, and return
   `FinalizationDraft{Empty:true}`.
-- [ ] Otherwise set `end_cursor`, `ended_at`, and `pending_summary`, returning
+- [x] Otherwise set `end_cursor`, `ended_at`, and `pending_summary`, returning
   the frozen paths.
-- [ ] Repeating seal on `pending_summary` returns the identical draft.
-- [ ] Repeating seal on `abandoned` returns an empty result.
-- [ ] Sealing `finalized` returns the associated Episode reference; it must not
+- [x] Repeating seal on `pending_summary` returns the identical draft.
+- [x] Repeating seal on `abandoned` returns an empty result.
+- [x] Sealing `finalized` returns the associated Episode reference; it must not
   reopen or mutate the Capture.
 
 ## Abandon
 
-- [ ] Allow abandon from `open` or `pending_summary`.
-- [ ] Delete raw Capture paths and transition to `abandoned` atomically.
-- [ ] Repeating abandon is a no-op.
-- [ ] Abandoning a finalized Capture returns `ErrInvalidState`.
+- [x] Allow abandon from `open` or `pending_summary`.
+- [x] Delete raw Capture paths and transition to `abandoned` atomically.
+- [x] Repeating abandon is a no-op.
+- [x] Abandoning a finalized Capture returns `ErrInvalidState`.
 
 ## Tests
 
-- [ ] Cover every valid and invalid status transition as a table-driven state
+- [x] Cover every valid and invalid status transition as a table-driven state
   machine test.
-- [ ] Race two `StartCapture` calls for the same Conversation.
-- [ ] Race repeated writes to one path and independent writes to many paths.
-- [ ] Verify `first_seen_at` is stable and `last_seen_at` advances.
-- [ ] Reject traversal and outside-worktree paths.
-- [ ] Verify deterministic seal ordering and idempotent repeated seals.
-- [ ] Verify empty Capture abandonment and raw-path deletion.
-- [ ] Verify a terminal row remains for idempotency.
-- [ ] Verify pending queries are Repository/Conversation isolated.
+- [x] Race two `StartCapture` calls for the same Conversation.
+- [x] Race repeated writes to one path and independent writes to many paths.
+- [x] Verify `first_seen_at` is stable and `last_seen_at` advances.
+- [x] Reject traversal and outside-worktree paths.
+- [x] Verify deterministic seal ordering and idempotent repeated seals.
+- [x] Verify empty Capture abandonment and raw-path deletion.
+- [x] Verify a terminal row remains for idempotency.
+- [x] Verify pending queries are Repository/Conversation isolated.
+
+## Implementation assumptions, plan changes, and upstream provenance
+
+Listed least-confident first:
+
+1. “Repeating seal on `abandoned` returns an empty result” is interpreted as an
+   idempotent `FinalizationDraft` identifying the Capture, with status
+   `abandoned`, `Empty:true`, and a non-nil empty path slice, rather than a
+   zero-valued draft that loses the Capture identity.
+2. An optional Conversation filter that does not match a persisted Conversation
+   returns an empty list and does not create a Conversation. Listing remains a
+   read of Capture state after the required Repository resolution.
+3. `RepositoryRoot`, `StartCursor`, and `EndCursor` are required as exact,
+   non-empty opaque strings. They are not trimmed or interpreted. The plan was
+   explicit only about the end cursor; requiring the other two avoids resolving
+   an accidental process working directory or creating a boundaryless Capture.
+4. Empty sealing stores the required end cursor as well as `ended_at`. This
+   preserves the observed terminal boundary even though no Episode will be
+   generated.
+5. “Freeze” means the ordered path set remains in `capture_paths` while the
+   Capture is `pending_summary`, and the state machine rejects every later
+   `RecordWrite`. Plan 4 atomically copies those rows into immutable Episode
+   history and deletes them; Plan 3 does not add a duplicate frozen-path table.
+6. Abandoning an already sealed `pending_summary` Capture preserves its existing
+   `ended_at`; abandoning an `open` Capture assigns the abandonment time. The
+   end boundary describes when capture stopped, not when later cleanup ran.
+7. Oldest-first ordering uses `started_at ASC, id ASC`. The UUIDv7 ID is only a
+   deterministic tie-breaker when timestamps are equal.
+8. `api_external_test.go` and `store_test.go` were added to the plan's file list.
+   The former pins the newly implemented public methods; the latter must expect
+   migration 2 and use schema version 3 as its future-version fixture.
+9. Entire was inspected at commit
+   `345a4e03b0a59e562c45e5df4e0b1ec12e71dede`. Relevant paths were
+   `cmd/entire/cli/session/phase.go` and `phase_test.go`,
+   `cmd/entire/cli/session/state.go` and `state_test.go`,
+   `cmd/entire/cli/agent/session.go`,
+   `cmd/entire/cli/agent/opencode/transcript.go`,
+   `cmd/entire/cli/checkpoint/store.go`, and
+   `cmd/entire/cli/paths/worktree.go` and its tests. Entire persists JSON
+   session state and Git-backed checkpoints, derives files from transcripts and
+   Git state, and uses an `idle/active/ended` lifecycle. It has no equivalent
+   SQLite Capture rows, partial uniqueness rule, transactional path upsert, or
+   Madeleine `open/pending_summary/finalized/abandoned` lifecycle. Copying its
+   code would violate D-008 and Madeleine's state semantics, so no upstream code
+   was copied. The implementation adapts only the compatible mechanics: one
+   canonical tested transition table, durable repository-relative paths,
+   terminal idempotency, and abandonment when no files were captured. Existing
+   `NOTICE` attribution remains intact.
+10. Before Plan 5, filesystem or shell-only changes are intentionally invisible.
+   A dedicated test creates an unrecorded file and confirms sealing abandons the
+   Capture; only successful `RecordWrite` paths can keep it pending in this PR.
+11. Terminology was clarified after implementation: Capture and Episode are the
+   domain entities; `live` and `history` are descriptions, not parallel models.
+   This changes documentation only and leaves the schema, API, and state machine
+   unchanged.
 
 ## Acceptance criteria
 
-- [ ] A process can crash after `RecordWrite`, reopen the Store, and recover the
+- [x] A process can crash after `RecordWrite`, reopen the Store, and recover the
   open Capture and its paths.
-- [ ] Live paths contain no reads, summaries, transcript bodies, or Pi-specific
-  tool payloads.
-- [ ] Only one open Capture can exist for a Conversation.
-- [ ] All prior migrations and tests continue to pass.
+- [x] Capture paths contain no reads, summaries, transcript bodies, or
+  Pi-specific tool payloads.
+- [x] Only one open Capture can exist for a Conversation.
+- [x] All prior migrations and tests continue to pass.
 
 ## Excluded from this PR
 

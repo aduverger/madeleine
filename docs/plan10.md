@@ -45,7 +45,7 @@ For `session_start` reasons other than `reload`:
   old Git diff and prevents old changes from entering the new baseline.
 - [ ] If a stale open Capture cannot be sealed, do not reattach it. Start of the
   new Capture returns a visible conflict and Madeleine write capture remains
-  disabled for safety; read-side History remains enabled.
+  disabled for safety; Episode retrieval remains enabled.
 - [ ] Empty stale Captures become abandoned and are not queued.
 - [ ] Never recover Captures from another Repository or Conversation
   automatically.
@@ -102,8 +102,8 @@ Cover:
 
 ## Concurrency verification
 
-- [ ] Add a Go integration test with concurrent History readers, Capture path
-  writers, and Episode publishers against one WAL database.
+- [ ] Add a Go integration test with concurrent exact-path Episode readers,
+  Capture path writers, and Episode publishers against one WAL database.
 - [ ] Assert no lost writes and no unexpected `SQLITE_BUSY` after bounded retry/
   timeout handling.
 - [ ] Record benchmark helpers for 1, 10, 100, and 500 simulated agents, but do
@@ -114,7 +114,7 @@ Cover:
 ## README and operations
 
 - [ ] Replace the placeholder README with a concise explanation of the north
-  star, History/Live lifecycle, Pi MVP behavior, and trust/privacy model.
+  star, Capture/Episode lifecycle, Pi MVP behavior, and trust/privacy model.
 - [ ] Document development installation:
 
 ```text

@@ -1,4 +1,4 @@
-# Plan 7: Pi package and historical read enrichment
+# Plan 7: Pi package and Episode context enrichment
 
 PR scope: one PR  
 Depends on: `plan6.md`  
@@ -7,8 +7,8 @@ Design decisions: D-001, D-003, D-011, D-012, D-016, D-017, D-020, D-021
 ## Goal
 
 Ship the read-only half of the Pi reference adapter: detect the Go binary,
-query exact-path History after successful reads, append safe L1 context, and
-expose explicit L2 Episode retrieval. Capture lifecycle begins in Plan 8.
+query Episodes by exact path after successful reads, append safe L1 context,
+and expose explicit L2 Episode retrieval. Capture lifecycle begins in Plan 8.
 
 ## Entire reuse gate
 
@@ -117,7 +117,7 @@ Use the madeleine_episode tool with an episode_id for the longer brief.
 Build a fake `ExtensionAPI`/context and a fake executable that speaks protocol
 version 1.
 
-- [ ] Successful read with zero, one, and five History entries.
+- [ ] Successful read with zero, one, and five Episode summaries.
 - [ ] More than five records are already truncated by the core and not
   re-ranked by TypeScript.
 - [ ] Repeated same-path reads inject once; distinct paths inject separately.
@@ -132,11 +132,11 @@ version 1.
 ## Acceptance criteria
 
 - [ ] `pi -e ./extensions/madeleine/index.ts` automatically enriches a normal
-  successful Pi read from pre-seeded History.
+  successful Pi read from pre-seeded Episodes.
 - [ ] The model can retrieve an Episode's L2 without retrieving the transcript.
 - [ ] Removing or breaking the Madeleine binary does not alter Pi read
   behavior.
-- [ ] No Capture rows or Live paths are created by the adapter yet.
+- [ ] No Capture rows or Capture paths are created by the adapter yet.
 
 ## Excluded from this PR
 
