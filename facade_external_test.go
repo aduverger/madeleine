@@ -13,10 +13,10 @@ import (
 func TestPublicStoreFacade(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	runGit(t, root, "init", "--quiet")
-	writeFile(t, root, "tracked.txt", "initial\n")
-	runGit(t, root, "add", "tracked.txt")
-	runGit(t, root, "-c", "user.name=Madeleine Test", "-c", "user.email=test@example.com",
+	runFacadeGit(t, root, "init", "--quiet")
+	writeFacadeFile(t, root, "tracked.txt", "initial\n")
+	runFacadeGit(t, root, "add", "tracked.txt")
+	runFacadeGit(t, root, "-c", "user.name=Madeleine Test", "-c", "user.email=test@example.com",
 		"commit", "--quiet", "-m", "initial")
 
 	discovered, err := madeleine.ResolveRepository(ctx, root)
@@ -38,12 +38,15 @@ func TestPublicStoreFacade(t *testing.T) {
 
 	key := madeleine.ConversationKey{Harness: madeleine.HarnessPi, ExternalID: "public-facade"}
 	capture, err := store.StartCapture(ctx, madeleine.StartCaptureRequest{
-		RepositoryRoot: root, ConversationKey: key, TranscriptRef: "session.jsonl", StartCursor: "start",
+		RepositoryRoot:  root,
+		ConversationKey: key,
+		TranscriptRef:   "session.jsonl",
+		StartCursor:     "start",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, root, "tracked.txt", "modified\n")
+	writeFacadeFile(t, root, "tracked.txt", "modified\n")
 	if err := store.RecordWrite(ctx, madeleine.RecordWriteRequest{
 		CaptureID: capture.ID, Path: "tracked.txt",
 	}); err != nil {
@@ -71,7 +74,9 @@ func TestPublicStoreFacade(t *testing.T) {
 		t.Fatalf("finalization draft = %#v", draft)
 	}
 	episode, err := store.PublishEpisode(ctx, madeleine.PublishEpisodeRequest{
-		CaptureID: capture.ID, L1: "Updated the tracked file.", L2: "The tracked file was changed through the public API.",
+		CaptureID: capture.ID,
+		L1:        "Updated the tracked file.",
+		L2:        "The tracked file was changed through the public API.",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -81,7 +86,8 @@ func TestPublicStoreFacade(t *testing.T) {
 	}
 
 	contexts, err := store.ContextForPaths(ctx, madeleine.ContextRequest{
-		RepositoryRoot: root, Paths: []string{"tracked.txt"},
+		RepositoryRoot: root,
+		Paths:          []string{"tracked.txt"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +105,7 @@ func TestPublicStoreFacade(t *testing.T) {
 	}
 }
 
-func writeFile(t *testing.T, root, path, contents string) {
+func writeFacadeFile(t *testing.T, root, path, contents string) {
 	t.Helper()
 	absolute := filepath.Join(root, filepath.FromSlash(path))
 	if err := os.MkdirAll(filepath.Dir(absolute), 0o755); err != nil {
@@ -110,7 +116,7 @@ func writeFile(t *testing.T, root, path, contents string) {
 	}
 }
 
-func runGit(t *testing.T, root string, arguments ...string) {
+func runFacadeGit(t *testing.T, root string, arguments ...string) {
 	t.Helper()
 	command := exec.Command("git", arguments...)
 	command.Dir = root
