@@ -10,6 +10,50 @@ Expose the Go library to non-Go harnesses through a stable one-request-per-
 process protocol. The CLI must be script-safe: stdout contains only the response
 object, stderr contains diagnostics, and operation failures use nonzero status.
 
+## Pre-implementation package structure
+
+The core was reorganized before this plan so the CLI does not grow around a
+flat application package:
+
+```text
+madeleine.go, types.go  public Go API and Store facade
+internal/store/         domain implementation, SQLite, and migrations
+internal/gitstate/      read-only Git snapshots and reconciliation
+internal/gitcmd/        Git process execution
+internal/repopath/      canonical repository-relative path normalization
+cmd/madeleine/          executable entry point introduced by this plan
+internal/rpc/            JSON protocol introduced by this plan
+```
+
+`internal/store` writes SQL directly. There is no storage interface,
+configurable backend, or speculative `store/sqlite` hierarchy. The root facade
+uses explicit conversions so its documented public structs do not expose types
+from an `internal` package. `cmd/madeleine` is preferred to a root `cli/`
+package because the command is an executable boundary, not a reusable public Go
+API; command orchestration may move to `internal/cli` only if it becomes
+substantial.
+
+### Restructure decision ledger
+
+Listed least-confident first:
+
+1. The public facade uses explicit conversions between root API structs and
+   private Store structs. Type aliases were simpler but made `go doc` hide the
+   public fields behind the inaccessible `internal/store` package; keeping the
+   root API self-documenting was judged more important than eliminating this
+   boundary mapping.
+2. Existing white-box tests moved with the implementation into
+   `internal/store`; a public end-to-end facade test now covers every conversion
+   path used by the normal Capture-to-Episode flow.
+3. Embedded migrations moved under `internal/store/migrations` with unchanged
+   SQL and version history. This changes source layout only, not database paths
+   or schema behavior.
+4. Git snapshot/reconciliation and path normalization became separate internal
+   packages because both have coherent ownership outside SQLite persistence.
+5. No root `cli/` package was added. Plan 6 starts with `cmd/madeleine` and
+   `internal/rpc`, adding `internal/cli` only if command orchestration later
+   becomes large enough to own a package.
+
 ## Entire reuse gate
 
 - [ ] Inspect the relevant `entireio/cli` implementation and tests before

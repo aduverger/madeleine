@@ -1,4 +1,4 @@
-package madeleine
+package repopath
 
 import (
 	"errors"
@@ -33,7 +33,7 @@ func TestNormalizeRepositoryPath(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := normalizeRepositoryPath(root, test.input)
+			got, err := Normalize(root, test.input)
 			if test.wantErr {
 				if !errors.Is(err, ErrOutsideRepository) {
 					t.Fatalf("error = %v, want ErrOutsideRepository", err)
@@ -65,7 +65,7 @@ func TestNormalizeRepositoryPathPreservesSymlinkIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := normalizeRepositoryPath(root, filepath.Join(root, "linked", "secret.txt"))
+	got, err := Normalize(root, filepath.Join(root, "linked", "secret.txt"))
 	if err != nil {
 		t.Fatalf("normalize symlink path: %v", err)
 	}

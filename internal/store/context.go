@@ -1,4 +1,4 @@
-package madeleine
+package store
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/aduverger/madeleine/internal/repopath"
 )
 
 const maxEpisodesPerPath = 5
@@ -35,7 +37,7 @@ func normalizeContextPaths(worktreeRoot string, requestedPaths []string) ([]File
 	contexts := make([]FileContext, 0, len(requestedPaths))
 	contextIndexByPath := make(map[string]int, len(requestedPaths))
 	for _, requestedPath := range requestedPaths {
-		path, err := normalizeRepositoryPath(worktreeRoot, requestedPath)
+		path, err := repopath.Normalize(worktreeRoot, requestedPath)
 		if err != nil {
 			return nil, nil, err
 		}

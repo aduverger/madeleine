@@ -1,4 +1,4 @@
-package madeleine
+package gitstate
 
 import (
 	"bytes"
@@ -15,20 +15,21 @@ import (
 	"time"
 
 	"github.com/aduverger/madeleine/internal/gitcmd"
+	"github.com/aduverger/madeleine/internal/repopath"
 )
 
 const gitObservationTimeout = 20 * time.Second
 
-type gitPathSnapshot struct {
+type PathSnapshot struct {
 	PorcelainStatus     string
 	WorktreeFingerprint string
 	IndexIdentity       string
 }
 
-type gitSnapshot struct {
+type Snapshot struct {
 	Head       string
 	HeadExists bool
-	Paths      map[string]gitPathSnapshot
+	Paths      map[string]PathSnapshot
 }
 
 type gitStatusEntry struct {
@@ -36,38 +37,38 @@ type gitStatusEntry struct {
 	PorcelainStatus string
 }
 
-func captureGitSnapshot(ctx context.Context, worktreeRoot string, additionalPaths []string) (gitSnapshot, error) {
+func Capture(ctx context.Context, worktreeRoot string, additionalPaths []string) (Snapshot, error) {
 	head, headExists, err := observeGitHead(ctx, worktreeRoot)
 	if err != nil {
-		return gitSnapshot{}, err
+		return Snapshot{}, err
 	}
 	statusOutput, err := runGitObservation(ctx, worktreeRoot,
 		"status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames")
 	if err != nil {
-		return gitSnapshot{}, fmt.Errorf("observe Git status: %w", err)
+		return Snapshot{}, fmt.Errorf("observe Git status: %w", err)
 	}
 	statusEntries, err := parsePorcelainStatus(statusOutput)
 	if err != nil {
-		return gitSnapshot{}, err
+		return Snapshot{}, err
 	}
-	paths := make(map[string]gitPathSnapshot, len(statusEntries)+len(additionalPaths))
+	paths := make(map[string]PathSnapshot, len(statusEntries)+len(additionalPaths))
 	for _, entry := range statusEntries {
-		path, err := normalizeRepositoryPath(worktreeRoot, entry.Path)
+		path, err := repopath.Normalize(worktreeRoot, entry.Path)
 		if err != nil {
-			return gitSnapshot{}, fmt.Errorf("normalize Git status path %q: %w", entry.Path, err)
+			return Snapshot{}, fmt.Errorf("normalize Git status path %q: %w", entry.Path, err)
 		}
 		if _, duplicate := paths[path]; duplicate {
-			return gitSnapshot{}, fmt.Errorf("Git status contains duplicate path %q", path)
+			return Snapshot{}, fmt.Errorf("Git status contains duplicate path %q", path)
 		}
-		paths[path] = gitPathSnapshot{PorcelainStatus: entry.PorcelainStatus}
+		paths[path] = PathSnapshot{PorcelainStatus: entry.PorcelainStatus}
 	}
 	for _, path := range additionalPaths {
-		normalized, err := normalizeRepositoryPath(worktreeRoot, path)
+		normalized, err := repopath.Normalize(worktreeRoot, path)
 		if err != nil {
-			return gitSnapshot{}, err
+			return Snapshot{}, err
 		}
 		if _, exists := paths[normalized]; !exists {
-			paths[normalized] = gitPathSnapshot{}
+			paths[normalized] = PathSnapshot{}
 		}
 	}
 
@@ -75,24 +76,24 @@ func captureGitSnapshot(ctx context.Context, worktreeRoot string, additionalPath
 	if len(paths) > 0 {
 		indexOutput, err := runGitObservation(ctx, worktreeRoot, "ls-files", "--stage", "-z")
 		if err != nil {
-			return gitSnapshot{}, fmt.Errorf("observe Git index: %w", err)
+			return Snapshot{}, fmt.Errorf("observe Git index: %w", err)
 		}
 		indexIdentities, err = parseIndexIdentities(indexOutput)
 		if err != nil {
-			return gitSnapshot{}, err
+			return Snapshot{}, err
 		}
 	}
 
 	for path, snapshot := range paths {
 		fingerprint, err := fingerprintWorktreePath(worktreeRoot, path)
 		if err != nil {
-			return gitSnapshot{}, fmt.Errorf("fingerprint %q: %w", path, err)
+			return Snapshot{}, fmt.Errorf("fingerprint %q: %w", path, err)
 		}
 		snapshot.WorktreeFingerprint = fingerprint
 		snapshot.IndexIdentity = indexIdentities[path]
 		paths[path] = snapshot
 	}
-	return gitSnapshot{Head: head, HeadExists: headExists, Paths: paths}, nil
+	return Snapshot{Head: head, HeadExists: headExists, Paths: paths}, nil
 }
 
 func observeGitHead(ctx context.Context, worktreeRoot string) (string, bool, error) {

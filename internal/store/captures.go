@@ -1,4 +1,4 @@
-package madeleine
+package store
 
 import (
 	"context"
@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/aduverger/madeleine/internal/gitstate"
+	"github.com/aduverger/madeleine/internal/repopath"
 )
 
 const captureSelect = `
@@ -30,7 +33,7 @@ func (s *Store) StartCapture(ctx context.Context, request StartCaptureRequest) (
 	if err != nil {
 		return Capture{}, err
 	}
-	gitBaseline, err := captureGitSnapshot(ctx, repository.WorktreeRoot, nil)
+	gitBaseline, err := gitstate.Capture(ctx, repository.WorktreeRoot, nil)
 	if err != nil {
 		return Capture{}, wrapError("start capture", request.RepositoryRoot, err)
 	}
@@ -125,7 +128,7 @@ func (s *Store) RecordWrite(ctx context.Context, request RecordWriteRequest) err
 			return err
 		}
 
-		path, err := normalizeRepositoryPath(worktreeRoot, request.Path)
+		path, err := repopath.Normalize(worktreeRoot, request.Path)
 		if err != nil {
 			return err
 		}
@@ -305,7 +308,7 @@ func insertCaptureGitBaseline(
 	ctx context.Context,
 	transaction *sql.Tx,
 	captureID CaptureID,
-	paths map[string]gitPathSnapshot,
+	paths map[string]gitstate.PathSnapshot,
 ) error {
 	for path, snapshot := range paths {
 		indexIdentity := sql.NullString{String: snapshot.IndexIdentity, Valid: snapshot.IndexIdentity != ""}

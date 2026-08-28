@@ -1,4 +1,4 @@
-package madeleine
+package store
 
 import (
 	"context"

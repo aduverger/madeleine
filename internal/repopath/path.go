@@ -1,19 +1,22 @@
-package madeleine
+package repopath
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 )
 
-func normalizeRepositoryPath(worktreeRoot, input string) (string, error) {
+var ErrOutsideRepository = errors.New("path is outside repository")
+
+func Normalize(worktreeRoot, input string) (string, error) {
 	if input == "" {
-		return "", wrapError("normalize repository path", input, ErrOutsideRepository)
+		return "", wrapError(input, ErrOutsideRepository)
 	}
 
 	root, err := filepath.Abs(worktreeRoot)
 	if err != nil {
-		return "", wrapError("normalize repository path", worktreeRoot, err)
+		return "", wrapError(worktreeRoot, err)
 	}
 	root = filepath.Clean(root)
 
@@ -23,16 +26,16 @@ func normalizeRepositoryPath(worktreeRoot, input string) (string, error) {
 	}
 	candidate, err = filepath.Abs(candidate)
 	if err != nil {
-		return "", wrapError("normalize repository path", input, err)
+		return "", wrapError(input, err)
 	}
 	candidate = filepath.Clean(candidate)
 
 	relative, err := filepath.Rel(root, candidate)
 	if err != nil {
-		return "", wrapError("normalize repository path", input, errors.Join(ErrOutsideRepository, err))
+		return "", wrapError(input, errors.Join(ErrOutsideRepository, err))
 	}
 	if relative == "." || relative == "" || isRelativeTraversal(relative) {
-		return "", wrapError("normalize repository path", input, ErrOutsideRepository)
+		return "", wrapError(input, ErrOutsideRepository)
 	}
 
 	return filepath.ToSlash(relative), nil
@@ -40,4 +43,11 @@ func normalizeRepositoryPath(worktreeRoot, input string) (string, error) {
 
 func isRelativeTraversal(path string) bool {
 	return path == ".." || strings.HasPrefix(path, "../") || strings.HasPrefix(path, `..\`)
+}
+
+func wrapError(reference string, err error) error {
+	if reference == "" {
+		return fmt.Errorf("normalize repository path: %w", err)
+	}
+	return fmt.Errorf("normalize repository path %q: %w", reference, err)
 }

@@ -376,7 +376,21 @@ MVP dependency.
 ## Public interfaces
 
 Madeleine ships a public Go library and a CLI boundary for non-Go harnesses.
-The root `madeleine` package exposes a concrete `Store`:
+The root `madeleine` package owns the documented public types and exposes a
+concrete `Store`. Private implementation is organized by responsibility:
+
+```text
+internal/store      domain implementation, SQLite, and migrations
+internal/gitstate   read-only Git snapshots and reconciliation
+internal/gitcmd     Git process execution
+internal/repopath   repository-relative path normalization
+internal/rpc        CLI protocol and dispatch
+cmd/madeleine       executable entry point
+```
+
+SQLite remains the only store implementation and SQL is written directly in
+`internal/store`; the layout does not introduce a configurable storage
+abstraction. The public API is:
 
 ```go
 Open(context.Context, Options) (*Store, error)
