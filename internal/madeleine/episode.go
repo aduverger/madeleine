@@ -25,10 +25,11 @@ func validateEpisodeSummaries(l1, l2 string) (string, string, error) {
 
 func (s *Service) PublishEpisode(ctx context.Context, request PublishEpisodeRequest) (Episode, error) {
 	l1, l2, err := validateEpisodeSummaries(request.L1, request.L2)
-	if err != nil || strings.TrimSpace(request.CompactEvidence) == "" {
-		if err == nil {
-			err = fmt.Errorf("%w: Episode compact evidence must not be empty", ErrInvalidState)
-		}
+	if err != nil {
+		return Episode{}, wrapError("publish Episode", string(request.CaptureID), err)
+	}
+	if strings.TrimSpace(request.CompactEvidence) == "" {
+		err := fmt.Errorf("%w: Episode compact evidence must not be empty", ErrInvalidState)
 		return Episode{}, wrapError("publish Episode", string(request.CaptureID), err)
 	}
 
@@ -43,28 +44,10 @@ func (s *Service) PublishEpisode(ctx context.Context, request PublishEpisodeRequ
 		}
 
 		if CaptureStatus(capture.Status) == CaptureStatusFinalized {
-			if capture.EpisodeID == "" {
-				return fmt.Errorf("%w: finalized Capture has no Episode", ErrInvalidState)
-			}
-			record, found, err := transaction.GetEpisode(ctx, capture.RepositoryID, capture.EpisodeID)
-			if err != nil {
-				return err
-			}
-			if !found {
-				return fmt.Errorf("%w: finalized Capture Episode does not exist", ErrInvalidState)
-			}
-			episode = episodeFromRecord(record)
-			transcript, found, err := transaction.GetTranscriptByCapture(ctx, capture.ID)
-			if err != nil {
-				return err
-			}
-			if !found || transcript.CompactText == nil {
-				return fmt.Errorf("%w: finalized Capture has no published Transcript", ErrInvalidState)
-			}
-			if episode.L1 != l1 || episode.L2 != l2 || *transcript.CompactText != request.CompactEvidence {
-				return fmt.Errorf("%w: Capture was published with different summaries or evidence", ErrConflict)
-			}
-			return nil
+			episode, err = publishedEpisodeForRetry(
+				ctx, transaction, capture, l1, l2, request.CompactEvidence,
+			)
+			return err
 		}
 		if CaptureStatus(capture.Status) != CaptureStatusPendingSummary {
 			return fmt.Errorf("%w: Capture status is %q", ErrInvalidState, capture.Status)
@@ -134,6 +117,37 @@ func (s *Service) PublishEpisode(ctx context.Context, request PublishEpisodeRequ
 	})
 	if err != nil {
 		return Episode{}, wrapError("publish Episode", string(request.CaptureID), err)
+	}
+	return episode, nil
+}
+
+func publishedEpisodeForRetry(
+	ctx context.Context,
+	transaction *store.Tx,
+	capture store.CaptureRecord,
+	l1, l2, compactEvidence string,
+) (Episode, error) {
+	if capture.EpisodeID == "" {
+		return Episode{}, fmt.Errorf("%w: finalized Capture has no Episode", ErrInvalidState)
+	}
+	record, found, err := transaction.GetEpisode(ctx, capture.RepositoryID, capture.EpisodeID)
+	if err != nil {
+		return Episode{}, err
+	}
+	if !found {
+		return Episode{}, fmt.Errorf("%w: finalized Capture Episode does not exist", ErrInvalidState)
+	}
+
+	episode := episodeFromRecord(record)
+	transcript, found, err := transaction.GetTranscriptByCapture(ctx, capture.ID)
+	if err != nil {
+		return Episode{}, err
+	}
+	if !found || transcript.CompactText == nil {
+		return Episode{}, fmt.Errorf("%w: finalized Capture has no published Transcript", ErrInvalidState)
+	}
+	if episode.L1 != l1 || episode.L2 != l2 || *transcript.CompactText != compactEvidence {
+		return Episode{}, fmt.Errorf("%w: Capture was published with different summaries or evidence", ErrConflict)
 	}
 	return episode, nil
 }

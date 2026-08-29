@@ -2,7 +2,6 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 
 export const maxMutationErrorCharacters = 1_000;
 
-const mutationTools = new Set(["edit", "write"]);
 const contextBlockPattern = /<madeleine-context\b[^>]*>(?:(?!<madeleine-context\b)[\s\S])*?<\/madeleine-context>/g;
 
 interface TextBlock {
@@ -108,11 +107,9 @@ function projectEntry(
     }
     case "assistant": {
       for (const block of message.content) {
-        if (block.type !== "toolCall" || !mutationTools.has(block.name)) continue;
+        if (block.type !== "toolCall" || (block.name !== "edit" && block.name !== "write")) continue;
         const path = mutationPath(block.arguments);
-        if (path) {
-          calls.set(block.id, { operation: block.name as "edit" | "write", path });
-        }
+        if (path) calls.set(block.id, { operation: block.name, path });
       }
       const text = contentText(message.content);
       return text ? [{ kind: "assistant", text }] : [];

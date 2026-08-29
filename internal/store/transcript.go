@@ -114,7 +114,10 @@ func scanOptionalTranscript(source scanner) (TranscriptRecord, bool, error) {
 	if errors.Is(err, sql.ErrNoRows) {
 		return TranscriptRecord{}, false, nil
 	}
-	return record, err == nil, err
+	if err != nil {
+		return TranscriptRecord{}, false, err
+	}
+	return record, true, nil
 }
 
 func scanTranscript(source scanner) (TranscriptRecord, error) {

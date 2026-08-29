@@ -330,11 +330,17 @@ func validateRepeatedSeal(
 	if !found || capture.TranscriptID == "" || transcript.ID != capture.TranscriptID {
 		return fmt.Errorf("%w: sealed Capture has no Transcript", ErrInvalidState)
 	}
+	if request.EndCursor != transcript.SourceEndCursor {
+		return fmt.Errorf("%w: Capture was sealed with different Transcript evidence", ErrConflict)
+	}
+	if request.Transcript == nil {
+		return nil
+	}
 	entries, err := transaction.TranscriptEntries(ctx, transcript.ID)
 	if err != nil {
 		return err
 	}
-	matches, err := transcriptInputMatches(request.Transcript, transcript, entries, request.EndCursor)
+	matches, err := transcriptInputMatches(*request.Transcript, transcript, entries)
 	if err != nil {
 		return err
 	}

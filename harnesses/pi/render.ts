@@ -47,20 +47,7 @@ export function renderEpisode(episode: EpisodeDetail): string {
     "Paths:",
     ...episode.paths.map((path) => `- ${escapeText(path)}`),
   ].join("\n");
-  const reservedBytes = Buffer.byteLength(`${header}\n${episodeTruncationNotice}\n${footer}\n`);
-  const truncated = truncateHead(body, {
-    maxBytes: DEFAULT_MAX_BYTES - reservedBytes,
-    maxLines: DEFAULT_MAX_LINES - 4,
-  });
-
-  return [
-    header,
-    truncated.content,
-    ...(truncated.truncated ? [episodeTruncationNotice] : []),
-    footer,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  return renderBoundedBlock(header, body, footer, episodeTruncationNotice);
 }
 
 export function renderTranscriptView(transcript: TranscriptView): string {
@@ -78,16 +65,19 @@ export function renderTranscriptView(transcript: TranscriptView): string {
     escapeText(content),
     navigation,
   ].filter(Boolean).join("\n");
-  const reservedBytes = Buffer.byteLength(`${header}\n${transcriptTruncationNotice}\n${footer}\n`);
+  return renderBoundedBlock(header, body, footer, transcriptTruncationNotice);
+}
+
+function renderBoundedBlock(header: string, body: string, footer: string, notice: string): string {
+  const reservedBytes = Buffer.byteLength(`${header}\n${notice}\n${footer}\n`);
   const truncated = truncateHead(body, {
     maxBytes: DEFAULT_MAX_BYTES - reservedBytes,
     maxLines: DEFAULT_MAX_LINES - 4,
   });
-
   return [
     header,
     truncated.content,
-    ...(truncated.truncated ? [transcriptTruncationNotice] : []),
+    ...(truncated.truncated ? [notice] : []),
     footer,
   ].filter(Boolean).join("\n");
 }

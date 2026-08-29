@@ -84,17 +84,10 @@ func decodeTranscriptEntries(records []store.TranscriptEntryRecord) ([]Transcrip
 }
 
 func transcriptInputMatches(
-	input *TranscriptInput,
+	input TranscriptInput,
 	record store.TranscriptRecord,
 	entries []store.TranscriptEntryRecord,
-	endCursor string,
 ) (bool, error) {
-	if endCursor != record.SourceEndCursor {
-		return false, nil
-	}
-	if input == nil {
-		return true, nil
-	}
 	if input.FormatVersion != record.FormatVersion {
 		return false, nil
 	}
