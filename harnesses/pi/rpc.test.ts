@@ -18,6 +18,21 @@ async function fakeClient(spec: Parameters<typeof createFakeMadeleine>[0], optio
   };
 }
 
+function captureResult() {
+  return {
+    id: "capture-1",
+    repository_id: "repository-1",
+    conversation_id: "conversation-1",
+    conversation_key: { harness: "pi", external_id: "session-1" },
+    worktree_root: "/repo",
+    status: "open",
+    transcript_ref: "/sessions/one.jsonl",
+    start_cursor: "entry-1",
+    started_at: "2026-01-01T00:00:00Z",
+    last_seen_at: "2026-01-01T00:00:00Z",
+  };
+}
+
 describe("RPCClient", () => {
   it("uses a non-empty binary override and otherwise falls back to PATH", () => {
     expect(new RPCClient({ env: { MADELEINE_BIN: " /tmp/bin with spaces " } }).binary).toBe(
@@ -88,6 +103,84 @@ describe("RPCClient", () => {
 
     await expect(client.contextForPath("/repo", "src/a.ts")).resolves.toHaveLength(1);
     await expect(client.getEpisode("/repo", "episode-1")).resolves.toEqual(detail);
+  });
+
+  it("validates Capture lifecycle results and request shapes", async () => {
+    const capture = captureResult();
+    const { client, fake } = await fakeClient({
+      methods: {
+        "capture.start": { result: capture },
+        "capture.get": { result: capture },
+        "capture.list_pending": { result: [capture] },
+        "capture.record_write": { result: {} },
+        "capture.seal": {
+          result: {
+            capture_id: "capture-1",
+            status: "pending_summary",
+            empty: false,
+            paths: ["src/a.ts"],
+          },
+        },
+        "capture.abandon": { result: {} },
+      },
+    });
+
+    await expect(
+      client.startCapture("/repo", "session-1", "/sessions/one.jsonl", "entry-1"),
+    ).resolves.toEqual(capture);
+    await expect(client.getCapture("capture-1")).resolves.toEqual(capture);
+    await expect(client.listPendingCaptures("/repo", "session-1")).resolves.toEqual([capture]);
+    await expect(client.recordWrite("capture-1", "/repo/src/a.ts")).resolves.toBeUndefined();
+    await expect(client.sealCapture("capture-1", "entry-2")).resolves.toMatchObject({
+      status: "pending_summary",
+      paths: ["src/a.ts"],
+    });
+    await expect(client.abandonCapture("capture-1")).resolves.toBeUndefined();
+
+    const requests = await fake.requests();
+    expect(requests[0]).toMatchObject({
+      args: ["rpc", "capture.start"],
+      request: {
+        params: {
+          conversation_key: { harness: "pi", external_id: "session-1" },
+          transcript_ref: "/sessions/one.jsonl",
+          start_cursor: "entry-1",
+        },
+      },
+    });
+  });
+
+  it("gives Git-backed lifecycle calls a longer timeout than lookups", async () => {
+    const capture = captureResult();
+    const lifecycleDelayMs = 50;
+    const { client } = await fakeClient(
+      {
+        methods: {
+          "capture.start": { result: capture, delayMs: lifecycleDelayMs },
+          "capture.seal": {
+            result: {
+              capture_id: "capture-1",
+              status: "pending_summary",
+              empty: false,
+              paths: ["src/a.ts"],
+            },
+            delayMs: lifecycleDelayMs,
+          },
+          "context.for_paths": { result: [], delayMs: lifecycleDelayMs },
+        },
+      },
+      { timeoutMs: 20, lifecycleTimeoutMs: 500 },
+    );
+
+    await expect(
+      client.startCapture("/repo", "session-1", "/sessions/one.jsonl", "entry-1"),
+    ).resolves.toEqual(capture);
+    await expect(client.sealCapture("capture-1", "entry-2")).resolves.toMatchObject({
+      status: "pending_summary",
+    });
+    await expect(client.contextForPath("/repo", "src/a.ts")).rejects.toMatchObject({
+      kind: "timeout",
+    });
   });
 
   it.each([

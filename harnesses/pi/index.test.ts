@@ -26,6 +26,8 @@ class FakeExtension {
       this.handlers.set(event, handlers);
     },
     registerTool: () => undefined,
+    registerCommand: () => undefined,
+    appendEntry: () => undefined,
   } as unknown as ExtensionAPI;
 
   async emit(event: string, payload: unknown, context: ExtensionContext): Promise<unknown[]> {
@@ -45,6 +47,11 @@ function context(cwd = "/repo", hasUI = true) {
     cwd,
     hasUI,
     signal: undefined,
+    sessionManager: {
+      getSessionFile: () => "/sessions/current.jsonl",
+      getLeafId: () => "leaf-1",
+      getBranch: () => [],
+    },
     ui: { notify },
   } as unknown as ExtensionContext;
   return { value, notify };
@@ -53,7 +60,11 @@ function context(cwd = "/repo", hasUI = true) {
 async function extensionWith(action: FakeAction, clientOptions = {}, cwd = "/repo with spaces") {
   const fake = await createFakeMadeleine({
     doctor: { result: healthyDoctorResult() },
-    methods: { "context.for_paths": action },
+    methods: {
+      "capture.list_pending": { result: [] },
+      "capture.start": { result: captureResult() },
+      "context.for_paths": action,
+    },
   });
   fakes.push(fake);
   const extension = new FakeExtension();
@@ -75,6 +86,21 @@ function readEvent(path: unknown, options: { isError?: boolean } = {}) {
     content: [{ type: "text", text: "original file content" }],
     details: { truncation: { truncated: false } },
     isError: options.isError ?? false,
+  };
+}
+
+function captureResult() {
+  return {
+    id: "capture-1",
+    repository_id: "repository-1",
+    conversation_id: "conversation-1",
+    conversation_key: { harness: "pi", external_id: "/sessions/current.jsonl" },
+    worktree_root: "/repo",
+    status: "open",
+    transcript_ref: "/sessions/current.jsonl",
+    start_cursor: "leaf-1",
+    started_at: "2026-01-01T00:00:00Z",
+    last_seen_at: "2026-01-01T00:00:00Z",
   };
 }
 
@@ -123,7 +149,7 @@ describe("read enrichment", () => {
     expect(repeat).toBeUndefined();
     expect(distinct).toBeDefined();
     const requests = await fake.requests();
-    expect(requests[1]).toMatchObject({
+    expect(requests.find((request) => request.args[1] === "context.for_paths")).toMatchObject({
       request: {
         params: { paths: [resolve(ctx.value.cwd, "src/a.ts")] },
       },
@@ -152,7 +178,9 @@ describe("read enrichment", () => {
       expect(fileURL).toBeDefined();
       expect(absolute).toBeUndefined();
       const requests = await fake.requests();
-      expect(requests[1]).toMatchObject({ request: { params: { paths: [path] } } });
+      expect(requests.find((request) => request.args[1] === "context.for_paths")).toMatchObject({
+        request: { params: { paths: [path] } },
+      });
     } finally {
       await rm(repository, { recursive: true, force: true });
     }
@@ -182,10 +210,12 @@ describe("read enrichment", () => {
 
     const [failed] = await extension.emit("tool_result", readEvent("src/a.ts", { isError: true }), ctx.value);
     const [malformed] = await extension.emit("tool_result", readEvent(42), ctx.value);
+    const [invalidURL] = await extension.emit("tool_result", readEvent("file://%"), ctx.value);
 
     expect(failed).toBeUndefined();
     expect(malformed).toBeUndefined();
-    expect(await fake.requests()).toHaveLength(1);
+    expect(invalidURL).toBeUndefined();
+    expect((await fake.requests()).filter((request) => request.args[1] === "context.for_paths")).toHaveLength(0);
   });
 
   it.each([

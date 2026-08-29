@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 
 const protocolVersion = 1;
 const defaultTimeoutMs = 2_000;
+const defaultLifecycleTimeoutMs = 30_000;
 const defaultMaxOutputBytes = 1024 * 1024;
 
 export type AdapterErrorKind =
@@ -42,6 +43,32 @@ export interface FileContext {
   episodes: EpisodeSummary[];
 }
 
+export type CaptureStatus = "open" | "pending_summary" | "finalized" | "abandoned";
+
+export interface Capture {
+  id: string;
+  repository_id: string;
+  conversation_id: string;
+  conversation_key: { harness: string; external_id: string };
+  worktree_root: string;
+  status: CaptureStatus;
+  transcript_ref?: string;
+  start_cursor: string;
+  end_cursor?: string;
+  started_at: string;
+  ended_at?: string;
+  last_seen_at: string;
+  episode_id?: string;
+}
+
+export interface FinalizationDraft {
+  capture_id: string;
+  status: CaptureStatus;
+  empty: boolean;
+  paths: string[];
+  episode_id?: string;
+}
+
 export interface EpisodeDetail {
   episode_id: string;
   harness: string;
@@ -68,18 +95,21 @@ interface ResponseEnvelope {
 interface RPCClientOptions {
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
+  lifecycleTimeoutMs?: number;
   maxOutputBytes?: number;
 }
 
 export class RPCClient {
   readonly binary: string;
   private readonly timeoutMs: number;
+  private readonly lifecycleTimeoutMs: number;
   private readonly maxOutputBytes: number;
 
   constructor(options: RPCClientOptions = {}) {
     const configuredBinary = (options.env ?? process.env).MADELEINE_BIN;
     this.binary = configuredBinary?.trim() || "madeleine";
     this.timeoutMs = options.timeoutMs ?? defaultTimeoutMs;
+    this.lifecycleTimeoutMs = options.lifecycleTimeoutMs ?? defaultLifecycleTimeoutMs;
     this.maxOutputBytes = options.maxOutputBytes ?? defaultMaxOutputBytes;
   }
 
@@ -117,14 +147,83 @@ export class RPCClient {
     );
   }
 
+  async startCapture(
+    repositoryRoot: string,
+    externalID: string,
+    transcriptRef: string,
+    startCursor: string,
+    signal?: AbortSignal,
+  ): Promise<Capture> {
+    return this.call(
+      "capture.start",
+      {
+        repository_root: repositoryRoot,
+        conversation_key: { harness: "pi", external_id: externalID },
+        transcript_ref: transcriptRef,
+        start_cursor: startCursor,
+      },
+      validateCapture,
+      signal,
+      this.lifecycleTimeoutMs,
+    );
+  }
+
+  async getCapture(captureID: string, signal?: AbortSignal): Promise<Capture> {
+    return this.call("capture.get", { capture_id: captureID }, validateCapture, signal);
+  }
+
+  async listPendingCaptures(
+    repositoryRoot: string,
+    externalID?: string,
+    signal?: AbortSignal,
+  ): Promise<Capture[]> {
+    const conversationKey = externalID
+      ? { harness: "pi", external_id: externalID }
+      : undefined;
+    return this.call(
+      "capture.list_pending",
+      { repository_root: repositoryRoot, conversation_key: conversationKey },
+      validateCaptures,
+      signal,
+    );
+  }
+
+  async recordWrite(captureID: string, path: string, signal?: AbortSignal): Promise<void> {
+    await this.call(
+      "capture.record_write",
+      { capture_id: captureID, path },
+      validateEmptyResult,
+      signal,
+    );
+  }
+
+  async sealCapture(
+    captureID: string,
+    endCursor: string,
+    signal?: AbortSignal,
+  ): Promise<FinalizationDraft> {
+    return this.call(
+      "capture.seal",
+      { capture_id: captureID, end_cursor: endCursor },
+      validateFinalizationDraft,
+      signal,
+      this.lifecycleTimeoutMs,
+    );
+  }
+
+  async abandonCapture(captureID: string, signal?: AbortSignal): Promise<void> {
+    await this.call("capture.abandon", { capture_id: captureID }, validateEmptyResult, signal);
+  }
+
   private async call<T>(
     method: string,
     params: unknown,
     validateResult: (value: unknown) => T,
     signal?: AbortSignal,
+    timeoutMs = this.timeoutMs,
   ): Promise<T> {
     const request = JSON.stringify({ protocol_version: protocolVersion, params });
-    const processResult = await this.run(["rpc", method], request, signal);
+    const processResult = await this.run(["rpc", method], request, signal, timeoutMs);
     const response = decodeEnvelope(processResult.stdout);
 
     if (!response.ok) {
@@ -139,7 +238,12 @@ export class RPCClient {
     return validateResult(response.result);
   }
 
-  private run(args: string[], input?: string, signal?: AbortSignal): Promise<ProcessResult> {
+  private run(
+    args: string[],
+    input?: string,
+    signal?: AbortSignal,
+    timeoutMs = this.timeoutMs,
+  ): Promise<ProcessResult> {
     return new Promise((resolve, reject) => {
       let child;
       try {
@@ -172,7 +276,7 @@ export class RPCClient {
       const cancel = () => fail(new AdapterError("cancelled", "Madeleine request was cancelled"));
       const timeout = setTimeout(
         () => fail(new AdapterError("timeout", "Madeleine request timed out")),
-        this.timeoutMs,
+        timeoutMs,
       );
 
       if (signal?.aborted) {
@@ -273,6 +377,63 @@ function validateFileContexts(value: unknown): FileContext[] {
     });
     return { path: context.path, episodes };
   });
+}
+
+function validateCapture(value: unknown): Capture {
+  if (
+    !isObject(value) ||
+    typeof value.id !== "string" ||
+    typeof value.repository_id !== "string" ||
+    typeof value.conversation_id !== "string" ||
+    !isConversationKey(value.conversation_key) ||
+    typeof value.worktree_root !== "string" ||
+    !isCaptureStatus(value.status) ||
+    (value.transcript_ref !== undefined && typeof value.transcript_ref !== "string") ||
+    typeof value.start_cursor !== "string" ||
+    (value.end_cursor !== undefined && typeof value.end_cursor !== "string") ||
+    typeof value.started_at !== "string" ||
+    (value.ended_at !== undefined && typeof value.ended_at !== "string") ||
+    typeof value.last_seen_at !== "string" ||
+    (value.episode_id !== undefined && typeof value.episode_id !== "string")
+  ) {
+    throw invalidResult();
+  }
+  return value as unknown as Capture;
+}
+
+function validateCaptures(value: unknown): Capture[] {
+  if (!Array.isArray(value)) throw invalidResult();
+  return value.map(validateCapture);
+}
+
+function validateFinalizationDraft(value: unknown): FinalizationDraft {
+  if (
+    !isObject(value) ||
+    typeof value.capture_id !== "string" ||
+    !isCaptureStatus(value.status) ||
+    typeof value.empty !== "boolean" ||
+    !isStringArray(value.paths) ||
+    (value.episode_id !== undefined && typeof value.episode_id !== "string")
+  ) {
+    throw invalidResult();
+  }
+  return value as unknown as FinalizationDraft;
+}
+
+function validateEmptyResult(value: unknown): void {
+  if (!isObject(value) || Object.keys(value).length !== 0) throw invalidResult();
+}
+
+function isConversationKey(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    typeof value.harness === "string" &&
+    typeof value.external_id === "string"
+  );
+}
+
+function isCaptureStatus(value: unknown): value is CaptureStatus {
+  return ["open", "pending_summary", "finalized", "abandoned"].includes(value as string);
 }
 
 function validateEpisodeDetail(value: unknown): EpisodeDetail {
