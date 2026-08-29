@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 
 const protocolVersion = 1;
 const defaultTimeoutMs = 2_000;
+const defaultLifecycleTimeoutMs = 30_000;
 const defaultMaxOutputBytes = 1024 * 1024;
 
 export type AdapterErrorKind =
@@ -94,18 +95,21 @@ interface ResponseEnvelope {
 interface RPCClientOptions {
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
+  lifecycleTimeoutMs?: number;
   maxOutputBytes?: number;
 }
 
 export class RPCClient {
   readonly binary: string;
   private readonly timeoutMs: number;
+  private readonly lifecycleTimeoutMs: number;
   private readonly maxOutputBytes: number;
 
   constructor(options: RPCClientOptions = {}) {
     const configuredBinary = (options.env ?? process.env).MADELEINE_BIN;
     this.binary = configuredBinary?.trim() || "madeleine";
     this.timeoutMs = options.timeoutMs ?? defaultTimeoutMs;
+    this.lifecycleTimeoutMs = options.lifecycleTimeoutMs ?? defaultLifecycleTimeoutMs;
     this.maxOutputBytes = options.maxOutputBytes ?? defaultMaxOutputBytes;
   }
 
@@ -160,6 +164,7 @@ export class RPCClient {
       },
       validateCapture,
       signal,
+      this.lifecycleTimeoutMs,
     );
   }
 
@@ -202,6 +207,7 @@ export class RPCClient {
       { capture_id: captureID, end_cursor: endCursor },
       validateFinalizationDraft,
       signal,
+      this.lifecycleTimeoutMs,
     );
   }
 
@@ -214,9 +220,10 @@ export class RPCClient {
     params: unknown,
     validateResult: (value: unknown) => T,
     signal?: AbortSignal,
+    timeoutMs = this.timeoutMs,
   ): Promise<T> {
     const request = JSON.stringify({ protocol_version: protocolVersion, params });
-    const processResult = await this.run(["rpc", method], request, signal);
+    const processResult = await this.run(["rpc", method], request, signal, timeoutMs);
     const response = decodeEnvelope(processResult.stdout);
 
     if (!response.ok) {
@@ -231,7 +238,12 @@ export class RPCClient {
     return validateResult(response.result);
   }
 
-  private run(args: string[], input?: string, signal?: AbortSignal): Promise<ProcessResult> {
+  private run(
+    args: string[],
+    input?: string,
+    signal?: AbortSignal,
+    timeoutMs = this.timeoutMs,
+  ): Promise<ProcessResult> {
     return new Promise((resolve, reject) => {
       let child;
       try {
@@ -264,7 +276,7 @@ export class RPCClient {
       const cancel = () => fail(new AdapterError("cancelled", "Madeleine request was cancelled"));
       const timeout = setTimeout(
         () => fail(new AdapterError("timeout", "Madeleine request timed out")),
-        this.timeoutMs,
+        timeoutMs,
       );
 
       if (signal?.aborted) {
