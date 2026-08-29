@@ -379,8 +379,9 @@ Madeleine is a standalone application. All Go implementation packages are
 private; versioned JSON RPC is the sole supported external API.
 
 ```text
-cmd/madeleine        executable entry point
-internal/rpc         JSON protocol and dispatch
+cmd/madeleine        minimal executable entry point
+internal/cli         process setup, command selection, doctor, and version
+internal/rpc         JSON protocol and Service dispatch
 internal/madeleine   product rules and orchestration
 internal/store       SQLite persistence and migrations
 internal/gitstate    read-only Git snapshots and reconciliation
@@ -388,10 +389,11 @@ internal/gitcmd      Git process execution
 internal/repopath    repository-relative path normalization
 ```
 
-Dependencies point from RPC through `internal/madeleine` to concrete supporting
-packages. `internal/store` contains SQL and persistence records and never
-imports the product layer. SQLite remains the only implementation; there is no
-storage interface or configurable backend.
+The CLI delegates RPC calls through `internal/rpc` and runs doctor checks
+against `internal/madeleine`; both paths use the same private application
+service. `internal/store` contains SQL and persistence records and never imports
+the product layer. SQLite remains the only implementation; there is no storage
+interface or configurable backend.
 
 The private application service retains one canonical operation vocabulary for
 RPC dispatch:

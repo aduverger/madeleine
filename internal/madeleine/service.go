@@ -11,6 +11,10 @@ type Service struct {
 	database *store.DB
 }
 
+func CheckDataDirectory(options Options) error {
+	return store.CheckHomeAccess(options.Home)
+}
+
 func Open(ctx context.Context, options Options) (*Service, error) {
 	database, err := store.Open(ctx, options.Home)
 	if err != nil {
@@ -21,6 +25,14 @@ func Open(ctx context.Context, options Options) (*Service, error) {
 
 func (s *Service) Close() error {
 	return s.database.Close()
+}
+
+func (s *Service) SchemaVersion(ctx context.Context) (int, error) {
+	version, err := s.database.SchemaVersion(ctx)
+	if err != nil {
+		return 0, wrapError("get schema version", "", err)
+	}
+	return version, nil
 }
 
 func nowUTC() time.Time {

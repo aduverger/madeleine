@@ -18,6 +18,9 @@ the existing schema.
 cmd/madeleine                    executable added by Plan 7
         |
         v
+internal/cli                     command adapter added by Plan 7
+        |
+        v
 internal/rpc                     JSON boundary added by Plan 7
         |
         v

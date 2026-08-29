@@ -104,6 +104,15 @@ func loadMigrations(source fs.FS) ([]migration, error) {
 	return migrations, nil
 }
 
+func (db *DB) SchemaVersion(ctx context.Context) (int, error) {
+	var version int
+	if err := db.db.QueryRowContext(ctx,
+		"SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&version); err != nil {
+		return 0, err
+	}
+	return version, nil
+}
+
 func readAppliedMigrationVersions(ctx context.Context, transaction *sql.Tx) (map[int]bool, error) {
 	rows, err := transaction.QueryContext(ctx, "SELECT version FROM schema_migrations")
 	if err != nil {
