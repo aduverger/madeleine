@@ -1,8 +1,4 @@
-import type {
-  ExtensionAPI,
-  ExtensionCommandContext,
-  ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
@@ -223,26 +219,19 @@ describe("Capture lifecycle", () => {
     expect(pi.entries).toHaveLength(1);
   });
 
-  it("falls back to the Conversation's single open Capture when reload state is missing", async () => {
-    const { pi, client, lifecycle, ctx, externalID } = setup();
-    client.captures.push(captureRecord("capture-existing", externalID));
+  it.each(["reload", "resume"] as const)(
+    "reattaches the Conversation's open Capture without persisted state on %s",
+    async (reason) => {
+      const { pi, client, lifecycle, ctx, externalID } = setup();
+      client.captures.push(captureRecord("capture-existing", externalID));
 
-    await pi.emit("session_start", { type: "session_start", reason: "reload" }, ctx);
+      await pi.emit("session_start", { type: "session_start", reason }, ctx);
 
-    expect(client.calls.map((call) => call.method)).toEqual(["list"]);
-    expect(lifecycle.currentCaptureID()).toBe("capture-existing");
-    expect(pi.entries.at(-1)?.data.capture_id).toBe("capture-existing");
-  });
-
-  it("reattaches the Conversation's open Capture when persisted state is missing", async () => {
-    const { pi, client, lifecycle, ctx, externalID } = setup();
-    client.captures.push(captureRecord("capture-old", externalID));
-
-    await pi.emit("session_start", { type: "session_start", reason: "resume" }, ctx);
-
-    expect(lifecycle.currentCaptureID()).toBe("capture-old");
-    expect(client.calls.map((call) => call.method)).toEqual(["list"]);
-  });
+      expect(client.calls.map((call) => call.method)).toEqual(["list"]);
+      expect(lifecycle.currentCaptureID()).toBe("capture-existing");
+      expect(pi.entries.at(-1)?.data.capture_id).toBe("capture-existing");
+    },
+  );
 
   it.each(["quit", "new", "resume", "fork"] as const)(
     "seals on session_shutdown: %s",
@@ -260,7 +249,7 @@ describe("Capture lifecycle", () => {
     const { pi, client, lifecycle, ctx, externalID } = setup();
     await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
 
-    const result = await lifecycle.rollover(ctx as unknown as ExtensionCommandContext);
+    const result = await lifecycle.rollover(ctx);
 
     expect(result).toMatchObject({
       sealed: { capture_id: "capture-1", status: "pending_summary" },
@@ -276,9 +265,7 @@ describe("Capture lifecycle", () => {
     await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
     client.fail.add("seal");
 
-    await expect(
-      lifecycle.rollover(ctx as unknown as ExtensionCommandContext),
-    ).rejects.toThrow("seal failed");
+    await expect(lifecycle.rollover(ctx)).rejects.toThrow("seal failed");
     expect(lifecycle.currentCaptureID()).toBe("capture-1");
 
     client.fail.delete("seal");

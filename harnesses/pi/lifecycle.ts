@@ -2,7 +2,6 @@ import {
   isEditToolResult,
   isWriteToolResult,
   type ExtensionAPI,
-  type ExtensionCommandContext,
   type ExtensionContext,
   type SessionShutdownEvent,
   type SessionStartEvent,
@@ -74,14 +73,13 @@ export class CaptureLifecycle {
     this.state.clearCapture();
   }
 
-  async rollover(ctx: ExtensionCommandContext): Promise<RolloverResult> {
-    if (!this.captureID) throw new Error("Madeleine has no active Capture");
+  async rollover(ctx: ExtensionContext): Promise<RolloverResult> {
+    const captureID = this.captureID;
+    if (!captureID) throw new Error("Madeleine has no active Capture");
 
     this.workController.abort();
     try {
-      const sealed = await this.sealCurrentCapture(ctx);
-      if (!sealed) throw new Error("Madeleine has no active Capture");
-
+      const sealed = await this.sealCapture(captureID, ctx);
       this.resetCaptureWork();
       await this.createCapture(ctx);
       if (!this.captureID) throw new Error("Madeleine could not start a replacement Capture");
@@ -210,15 +208,13 @@ export class CaptureLifecycle {
     if (event.reason === "reload" || !this.captureID) return;
 
     try {
-      await this.sealCurrentCapture(ctx);
+      await this.sealCapture(this.captureID, ctx);
     } catch {
       this.notifyOnce(ctx, "seal", "Madeleine could not seal the current Capture; it remains recoverable.");
     }
   }
 
-  private async sealCurrentCapture(ctx: ExtensionContext): Promise<FinalizationDraft | undefined> {
-    if (!this.captureID) return undefined;
-    const captureID = this.captureID;
+  private async sealCapture(captureID: string, ctx: ExtensionContext): Promise<FinalizationDraft> {
     const draft = await this.client.sealCapture(captureID, this.state.ensureCursor(ctx));
     this.clearCurrentCapture(captureID);
     return draft;
