@@ -1,0 +1,249 @@
+import {
+  isEditToolResult,
+  isWriteToolResult,
+  type ExtensionAPI,
+  type ExtensionContext,
+  type SessionShutdownEvent,
+  type SessionStartEvent,
+  type ToolResultEvent,
+} from "@earendil-works/pi-coding-agent";
+import { access } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import type { Capture, FinalizationDraft } from "./rpc.ts";
+import { PiState, type ConversationIdentity } from "./state.ts";
+
+const writeRefreshIntervalMs = 30_000;
+const unicodeSpaces = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
+
+export interface CaptureClient {
+  startCapture(
+    repositoryRoot: string,
+    externalID: string,
+    transcriptRef: string,
+    startCursor: string,
+    signal?: AbortSignal,
+  ): Promise<Capture>;
+  getCapture(captureID: string, signal?: AbortSignal): Promise<Capture>;
+  listPendingCaptures(
+    repositoryRoot: string,
+    externalID?: string,
+    signal?: AbortSignal,
+  ): Promise<Capture[]>;
+  recordWrite(captureID: string, path: string, signal?: AbortSignal): Promise<void>;
+  sealCapture(captureID: string, endCursor: string, signal?: AbortSignal): Promise<FinalizationDraft>;
+}
+
+export class CaptureLifecycle {
+  private repositoryRoot = "";
+  private conversation: ConversationIdentity | undefined;
+  private captureID: string | undefined;
+  private workController = new AbortController();
+  private readonly lastPersistedWrite = new Map<string, number>();
+  private readonly writesInFlight = new Set<string>();
+  private readonly notifications = new Set<string>();
+
+  constructor(
+    private readonly client: CaptureClient,
+    private readonly state: PiState,
+    private readonly ready: (ctx: ExtensionContext) => Promise<boolean>,
+    private readonly now: () => number = () => performance.now(),
+  ) {}
+
+  register(pi: ExtensionAPI): void {
+    pi.on("session_start", (event, ctx) => this.start(event, ctx));
+    pi.on("tool_result", (event, ctx) => this.recordMutation(event, ctx));
+    pi.on("session_shutdown", (event, ctx) => this.shutdown(event, ctx));
+  }
+
+  currentCaptureID(): string | undefined {
+    return this.captureID;
+  }
+
+  clearCurrentCapture(captureID: string): void {
+    if (this.captureID !== captureID) return;
+    this.captureID = undefined;
+    this.state.clearCapture();
+  }
+
+  private async start(event: SessionStartEvent, ctx: ExtensionContext): Promise<void> {
+    if (!(await this.ready(ctx))) return;
+
+    this.repositoryRoot = ctx.cwd;
+    this.conversation = this.state.initialize(ctx, event.reason);
+    this.captureID = undefined;
+    this.lastPersistedWrite.clear();
+    this.writesInFlight.clear();
+    this.workController.abort();
+    this.workController = new AbortController();
+
+    try {
+      if (event.reason === "reload") {
+        await this.resumeReload(ctx);
+      } else {
+        await this.startNewRun(ctx);
+      }
+    } catch {
+      this.notifyOnce(ctx, "start", "Madeleine could not start write capture for this run.");
+    }
+  }
+
+  private async resumeReload(ctx: ExtensionContext): Promise<void> {
+    const persistedCaptureID = this.state.currentCaptureID();
+    if (persistedCaptureID) {
+      try {
+        const capture = await this.client.getCapture(persistedCaptureID, this.workController.signal);
+        if (this.isOpenCurrentConversation(capture)) {
+          this.captureID = capture.id;
+          return;
+        }
+      } catch {
+        // Fall back to the canonical pending-Capture query below.
+      }
+    }
+
+    const openCaptures = await this.openCapturesForConversation();
+    if (openCaptures.length === 1) {
+      const captureID = openCaptures[0]!.id;
+      this.state.attachCapture(captureID);
+      this.captureID = captureID;
+      return;
+    }
+    if (openCaptures.length > 1) {
+      this.notifyOnce(ctx, "reload-conflict", "Madeleine found multiple open Captures; write capture is disabled.");
+      return;
+    }
+    await this.createCapture(ctx);
+  }
+
+  private async startNewRun(ctx: ExtensionContext): Promise<void> {
+    const openCaptures = await this.openCapturesForConversation();
+    if (openCaptures.length > 0) {
+      this.notifyOnce(
+        ctx,
+        "older-open",
+        "Madeleine found an unfinished Capture. Write capture is disabled for this run; use /madeleine status.",
+      );
+      return;
+    }
+    await this.createCapture(ctx);
+  }
+
+  private async createCapture(ctx: ExtensionContext): Promise<void> {
+    if (!this.conversation) return;
+    const capture = await this.client.startCapture(
+      this.repositoryRoot,
+      this.conversation.externalID,
+      this.conversation.transcriptRef,
+      this.state.ensureCursor(ctx),
+      this.workController.signal,
+    );
+    this.state.attachCapture(capture.id);
+    this.captureID = capture.id;
+  }
+
+  private async openCapturesForConversation(): Promise<Capture[]> {
+    if (!this.conversation) return [];
+    const captures = await this.client.listPendingCaptures(
+      this.repositoryRoot,
+      this.conversation.externalID,
+      this.workController.signal,
+    );
+    return captures.filter((capture) => capture.status === "open");
+  }
+
+  private isOpenCurrentConversation(capture: Capture): boolean {
+    return (
+      capture.status === "open" &&
+      capture.conversation_key.harness === "pi" &&
+      capture.conversation_key.external_id === this.conversation?.externalID
+    );
+  }
+
+  private async recordMutation(event: ToolResultEvent, ctx: ExtensionContext): Promise<void> {
+    if (
+      !this.captureID ||
+      event.isError ||
+      (!isEditToolResult(event) && !isWriteToolResult(event))
+    ) {
+      return;
+    }
+
+    const inputPath = event.input.path;
+    if (typeof inputPath !== "string" || inputPath.length === 0) return;
+
+    let path: string;
+    try {
+      path = await resolvePiToolPath(inputPath, ctx.cwd);
+    } catch {
+      return;
+    }
+
+    const now = this.now();
+    const lastPersisted = this.lastPersistedWrite.get(path);
+    if (
+      this.writesInFlight.has(path) ||
+      (lastPersisted !== undefined && now - lastPersisted < writeRefreshIntervalMs)
+    ) {
+      return;
+    }
+
+    this.writesInFlight.add(path);
+    try {
+      await this.client.recordWrite(this.captureID, path, this.workController.signal);
+      this.lastPersistedWrite.set(path, this.now());
+    } catch {
+      this.notifyOnce(ctx, "record-write", "Madeleine could not record a file write.");
+    } finally {
+      this.writesInFlight.delete(path);
+    }
+  }
+
+  private async shutdown(event: SessionShutdownEvent, ctx: ExtensionContext): Promise<void> {
+    this.workController.abort();
+    if (event.reason === "reload" || !this.captureID) return;
+
+    const captureID = this.captureID;
+    try {
+      await this.client.sealCapture(captureID, this.state.ensureCursor(ctx));
+      this.clearCurrentCapture(captureID);
+    } catch {
+      this.notifyOnce(ctx, "seal", "Madeleine could not seal the current Capture; it remains recoverable.");
+    }
+  }
+
+  private notifyOnce(ctx: ExtensionContext, key: string, message: string): void {
+    if (!ctx.hasUI || this.notifications.has(key)) return;
+    this.notifications.add(key);
+    ctx.ui.notify(message, "warning");
+  }
+}
+
+export async function resolvePiToolPath(inputPath: string, cwd: string): Promise<string> {
+  let path = inputPath.replace(unicodeSpaces, " ");
+  if (path.startsWith("@")) path = path.slice(1);
+  if (path.startsWith("file://")) path = fileURLToPath(path);
+  if (path === "~") path = homedir();
+  if (path.startsWith("~/")) path = join(homedir(), path.slice(2));
+
+  const resolved = resolve(cwd, path);
+  const decomposed = resolved.normalize("NFD");
+  const candidates = [
+    resolved,
+    resolved.replace(/ (AM|PM)\./gi, "\u202F$1."),
+    decomposed,
+    resolved.replaceAll("'", "’"),
+    decomposed.replaceAll("'", "’"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      await access(candidate);
+      return candidate;
+    } catch {
+      // Try the next filename form accepted by Pi's built-in tools.
+    }
+  }
+  return resolved;
+}

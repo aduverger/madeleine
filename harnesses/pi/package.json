@@ -7,10 +7,13 @@
     "pi-package"
   ],
   "files": [
+    "commands.ts",
     "episode-tool.ts",
     "index.ts",
+    "lifecycle.ts",
     "render.ts",
     "rpc.ts",
+    "state.ts",
     "LICENSE",
     "NOTICE"
   ],
