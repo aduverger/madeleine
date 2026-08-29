@@ -7,6 +7,7 @@ import {
 import { access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { registerEpisodeTool } from "./episode-tool.ts";
 import { type DoctorCheck, type EpisodeDetail, type FileContext, RPCClient } from "./rpc.ts";
@@ -90,6 +91,7 @@ const unicodeSpaces = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 async function resolvePiReadPath(inputPath: string, cwd: string): Promise<string> {
   let path = inputPath.replace(unicodeSpaces, " ");
   if (path.startsWith("@")) path = path.slice(1);
+  if (path.startsWith("file://")) path = fileURLToPath(path);
   if (path === "~") path = homedir();
   if (path.startsWith("~/")) path = join(homedir(), path.slice(2));
 

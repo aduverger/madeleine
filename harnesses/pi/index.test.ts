@@ -1,5 +1,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { resolve } from "node:path";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { registerMadeleine } from "./index.ts";
@@ -47,7 +50,7 @@ function context(cwd = "/repo", hasUI = true) {
   return { value, notify };
 }
 
-async function extensionWith(action: FakeAction, clientOptions = {}) {
+async function extensionWith(action: FakeAction, clientOptions = {}, cwd = "/repo with spaces") {
   const fake = await createFakeMadeleine({
     doctor: { result: healthyDoctorResult() },
     methods: { "context.for_paths": action },
@@ -58,7 +61,7 @@ async function extensionWith(action: FakeAction, clientOptions = {}) {
     extension.api,
     new RPCClient({ env: { MADELEINE_BIN: fake.binary }, ...clientOptions }),
   );
-  const ctx = context("/repo with spaces");
+  const ctx = context(cwd);
   await extension.emit("session_start", { reason: "startup" }, ctx.value);
   return { extension, fake, ctx };
 }
@@ -125,6 +128,34 @@ describe("read enrichment", () => {
         params: { paths: [resolve(ctx.value.cwd, "src/a.ts")] },
       },
     });
+  });
+
+  it("normalizes file URLs and deduplicates their absolute path", async () => {
+    const repository = await mkdtemp(join(tmpdir(), "madeleine-repository-"));
+    const path = join(repository, "src", "a.ts");
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, "content\n");
+
+    try {
+      const { extension, fake, ctx } = await extensionWith(
+        { contextEpisodes: [oneSummary()] },
+        {},
+        repository,
+      );
+      const [fileURL] = await extension.emit(
+        "tool_result",
+        readEvent(pathToFileURL(path).href),
+        ctx.value,
+      );
+      const [absolute] = await extension.emit("tool_result", readEvent(path), ctx.value);
+
+      expect(fileURL).toBeDefined();
+      expect(absolute).toBeUndefined();
+      const requests = await fake.requests();
+      expect(requests[1]).toMatchObject({ request: { params: { paths: [path] } } });
+    } finally {
+      await rm(repository, { recursive: true, force: true });
+    }
   });
 
   it("keeps five summaries in the order returned by the core", async () => {

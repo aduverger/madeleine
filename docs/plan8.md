@@ -165,9 +165,10 @@ finalization, and crash recovery.
   `harnesses/pi/` so later Claude Code, Codex, and other harness integrations
   have explicit sibling ownership. Pi's package metadata now lives with its
   implementation and is published independently as `@aduverger/madeleine-pi`.
-- Aligned read-path lookup with Pi's built-in normalization and bounded L2 tool
-  output with Pi's exported 50KB/2000-line truncation defaults after independent
-  review identified exact-path misses and unbounded model-facing output.
+- Aligned read-path lookup with Pi's built-in normalization, including file
+  URLs, and bounded L2 tool output with Pi's exported 50KB/2000-line truncation
+  defaults after independent review identified exact-path misses and unbounded
+  model-facing output.
 
 ## Entire inspection record
 
