@@ -122,11 +122,13 @@ paths are removed after successful Episode publication.
 
 ### Transcript
 
-Sanitized evidence for one non-empty sealed Capture. Its versioned chronological
-entries become immutable during sealing; its compact text is prepared exactly
-once after authoritative paths are frozen and before L1/L2 generation. The
-completed Transcript also stores opaque source cursors and a generated stable
-ID. It never stores or depends on the harness transcript-file path.
+Sanitized semantic evidence for one non-empty sealed Capture. Its versioned
+chronological entries become immutable during sealing. If their projection
+exceeds the active model's context, Pi creates Capture-specific chronological
+chunk summaries; the exact final compact evidence used for successful L1/L2 is
+frozen atomically with Episode publication. The completed Transcript also stores
+opaque source cursors and a generated stable ID. It never stores or depends on
+the harness transcript-file path.
 
 ### Episode
 
@@ -179,12 +181,12 @@ successful edit/write
     -> record exact path immediately
 
 session_shutdown (quit/new/resume/fork)
-    -> project the cursor-bounded sanitized Transcript
+    -> project the cursor-bounded sanitized semantic Transcript
     -> atomically persist structured Transcript entries and seal Capture
     -> abandon if the structured path set is empty
-    -> persist compact view with frozen paths exactly once
-    -> generate L1/L2 from that compact view with the active Pi model
-    -> atomically publish Episode
+    -> fit projection to the active model through Capture-specific chunk summaries when needed
+    -> generate L1/L2 from the final compact evidence
+    -> atomically persist compact evidence and publish Episode
 ```
 
 Summary or publication failure leaves the sealed Capture in
@@ -227,10 +229,12 @@ there is no misleadingly atomic rollover method in the core API.
 
 ### Clean summary timeout
 
-Summary generation uses the active Pi model through `ctx.modelRegistry` and a
-30-second abort timeout. Shutdown waits for that bounded attempt. Timeout,
-missing authentication, invalid JSON, or an empty response leaves the Capture
-pending for later automatic or explicit retry.
+Summary generation uses the active Pi model through `ctx.modelRegistry`. Each
+model call has a 30-second abort timeout. A session-scale Capture may require
+several sequential chunk calls plus final synthesis, so the complete attempt can
+take longer. Timeout, missing authentication, invalid JSON, truncated output, or
+an empty response leaves the Capture pending for later automatic or explicit
+retry.
 
 ## Historical context
 
@@ -265,12 +269,15 @@ Transcript in SQLite. It has two representations of the same evidence:
 - `raw` is the fuller chronological structured entry sequence, paged by stable
   position.
 
-Both include user and assistant text, branch summaries, and structured mutation
-calls/results. They exclude Pi compaction entries, read-output bulk,
-image/audio bodies, thinking, internal custom state, and recursively injected
-Madeleine context. Pi's append-only raw messages remain available across
-compaction, while a compaction summary may contain ancestors from before the
-Capture boundary.
+Raw entries include complete user and assistant text, branch summaries,
+authoritative paths, and structured mutation operation/path/status metadata.
+Failed mutations retain a short error. Compact evidence is that semantic
+projection when it fits, otherwise ordered Capture-specific summaries of it.
+Both exclude Pi compaction entries, read calls and outputs, write content, edit
+old/new bodies, successful mutation result prose, image/audio bodies, thinking,
+internal custom state, and recursively injected Madeleine context. Pi's
+append-only raw messages remain available across compaction, while a compaction
+summary may contain ancestors from before the Capture boundary.
 
 The Pi adapter exposes `madeleine_transcript` for repository-scoped compact or
 raw retrieval. These are evidence views, not generated L3/L4 summaries, and no
@@ -379,8 +386,8 @@ episode_files
 agents touching one path therefore do not mutate one shared aggregate row.
 Episode paths are likewise append-oriented through `(episode_id, path)`
 relationships. Each non-empty sealed Capture owns one Transcript whose
-versioned structured entries are frozen during sealing and whose exact compact
-summary input is then prepared once and retained with the published Episode.
+versioned structured entries are frozen during sealing and whose exact final
+compact summary evidence is retained atomically with the published Episode.
 
 SQLite is canonical for the MVP. There is no second canonical harness-file
 reference, rebuildable materialized index, or per-session journal file. Export
@@ -436,7 +443,6 @@ ResolveRepository(context.Context, string) (Repository, error)
 (*Service).AbandonCapture(context.Context, CaptureID) error
 (*Service).ContextForPaths(context.Context, ContextRequest) ([]FileContext, error)
 (*Service).GetEpisode(context.Context, EpisodeRequest) (EpisodeDetail, error)
-(*Service).PrepareTranscript(context.Context, PrepareTranscriptRequest) error
 (*Service).GetTranscript(context.Context, TranscriptRequest) (TranscriptView, error)
 (*Service).Close() error
 ```
@@ -646,7 +652,7 @@ reference boundary.
 | D-022 | Ship Madeleine as a standalone application with private Go packages and versioned JSON RPC as its external API. | Locked | Harnesses share one protocol; internal package structure can evolve without Go API compatibility constraints. |
 | D-023 | Organize and package harness integrations under `harnesses/<harness>`. | Locked | Each harness owns its integration mechanics and release format; only proven common behavior is shared through the CLI or later extraction. |
 | D-024 | Attribute Episode paths only from successful structured harness mutation events in the MVP. | Locked | Git/filesystem reconciliation is deferred; retrieval precision is preferred over exhaustive change detection. |
-| D-025 | Persist one sanitized cursor-bounded Transcript per non-empty Capture and expose compact/raw views by generated ID. | Locked | Episode evidence survives harness-file deletion; compact is the exact L1/L2 input and raw is paged structured evidence. |
+| D-025 | Persist one sanitized cursor-bounded Transcript per non-empty Capture and expose compact/raw views by generated ID. | Locked | Episode evidence survives harness-file deletion; compact is the exact final L1/L2 evidence after any Capture-specific chunking and raw is paged structured evidence. |
 
 ## Reference documentation
 

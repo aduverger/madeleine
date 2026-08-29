@@ -58,8 +58,9 @@ Plan 9 already establishes the open-Capture policy:
 - [ ] Snapshot `pending_summary` Captures for the current Conversation
   oldest-first after the current open Capture is attached or started.
 - [ ] Attempt each queued Capture at most once during that runtime.
-- [ ] Reuse Plan 11's persisted compact transcript plus Plan 10's model,
-  validation, and publication functions; add no second recovery implementation.
+- [ ] Reuse Plan 11's persisted raw Transcript entries plus Plan 10's semantic
+  projection, model-sized chunking, validation, and publication functions; add
+  no second recovery implementation.
 - [ ] Continue after a per-Capture validation or publication failure while
   reporting one concise notification.
 - [ ] Associate an AbortController with the worker.
@@ -140,8 +141,9 @@ pi install npm:@aduverger/madeleine-pi@0.1.0
   `madeleine doctor`, all `/madeleine` commands including `rollover` and
   `retry`, and the Episode/Transcript tools.
 - [ ] Explain what is stored: intentionally mutated paths, summaries,
-  timestamps, and sanitized cursor-bounded Transcript entries. Original harness
-  transcript files and binary/read-output bulk are not copied.
+  timestamps, sanitized cursor-bounded semantic Transcript entries, and the
+  compact evidence for published Episodes. Original harness transcript files,
+  read calls/results, and edit/write file bodies are not copied.
 - [ ] Explain crash reattachment, pending-summary retry, explicit
   retry/rollover/abandon, and how to disable or remove the Pi package.
 - [ ] State clearly that opaque shell and filesystem changes are not attributed

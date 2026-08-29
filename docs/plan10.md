@@ -6,8 +6,9 @@ Design decisions: D-003, D-006, D-013, D-016, D-017, D-021, D-023, D-024
 
 ## Goal
 
-Complete the clean-run pipeline: seal a Capture, project its bounded Pi
-transcript, generate validated L1/L2 with the active model, and publish an
+Complete the clean-run pipeline: seal a session-scale Capture, project its
+cursor-bounded semantic Pi transcript, compact that evidence against the active
+model's context window when necessary, generate validated L1/L2, and publish an
 immutable Episode. Any failure must leave `pending_summary` recoverable.
 
 ## Entire reuse gate
@@ -55,12 +56,29 @@ harnesses/pi/*.test.ts
   unrelated tool-result bulk.
 - [x] Strip complete `<madeleine-context ...>...</madeleine-context>` blocks
   before constructing summary input.
-- [x] Retain mutation tool names, relevant inputs, success/failure, and bounded
-  textual results.
-- [x] Bound individual entries and total projection size with named constants;
-  reserve the first user goal, then select all other entries newest-first
-  regardless of whether they are messages, mutations, or branch summaries.
-- [x] Mark the projected transcript as untrusted source data in the prompt.
+- [x] Retain mutation tool names, paths, success/failure, and a short error for
+  failed mutations.
+- [x] Exclude `write` content, `edit` old/new text, and successful mutation
+  result prose. Authoritative paths already preserve the relevant file facts.
+- [x] Preserve the complete sanitized semantic projection; do not discard old
+  in-bound messages through a fixed character limit.
+- [x] Mark projected transcript and intermediate summaries as untrusted source
+  data in every model prompt.
+
+## Session-scale compaction
+
+- [x] Read the active model's `contextWindow` token limit from `ctx.model`.
+- [x] Estimate prompt tokens with Pi's exported conservative `estimateTokens`
+  helper.
+- [x] Reserve the requested output tokens plus a safety margin before choosing
+  the maximum input size.
+- [x] If the semantic projection fits, generate L1/L2 in one model call.
+- [x] Otherwise split it chronologically into model-sized chunks, summarize
+  each chunk, and synthesize L1/L2 from the ordered intermediate summaries.
+- [x] Recursively compact intermediate summaries only when their combined text
+  still cannot fit the final call.
+- [x] Never use Pi compaction summaries as a shortcut because their cumulative
+  content may begin before the Capture boundary.
 
 ## Summary contract
 
@@ -85,11 +103,13 @@ The model must return exactly one JSON object and no Markdown fence:
 ## Active-model call
 
 - [x] Use `ctx.model`; if absent or unauthenticated, leave the Capture pending.
-- [x] Call `ctx.modelRegistry.complete` with one user message, the active model,
-  `cacheRetention: "none"`, a fresh UUIDv7 session ID, and `maxTokens: 1200`.
-- [x] Use an AbortController with a 30-second timeout and combine it with any
-  lifecycle cancellation.
-- [x] Extract text content only and validate the strict JSON contract.
+- [x] Call `ctx.modelRegistry.complete` for each segment or final synthesis with
+  one user message, the active model, `cacheRetention: "none"`, a fresh UUIDv7
+  session ID, and a bounded output-token limit.
+- [x] Use an AbortController with a 30-second timeout per model call and combine
+  it with any lifecycle cancellation.
+- [x] Reject truncated, empty, error, and aborted intermediate responses.
+- [x] Extract final text content only and validate the strict JSON contract.
 - [x] Never insert the summarization request/response into the active Pi
   Conversation.
 
@@ -136,10 +156,11 @@ The model must return exactly one JSON object and no Markdown fence:
 - [x] Forked branch reconstruction using parent IDs.
 - [x] Branch-summary inclusion and compaction-summary omission, including a
   Capture spanning compaction through its raw messages.
-- [x] Read-output omission, mutation retention, binary-content omission, and
-  recursive Madeleine-context stripping.
-- [x] Projection truncation preserves the first goal and selects recent
-  messages, mutations, and branch summaries without type-based priority.
+- [x] Read-output, mutation payload, successful result prose, and binary-content
+  omission; mutation metadata, bounded failures, and recursive
+  Madeleine-context stripping.
+- [x] Long semantic evidence is preserved and split according to the active
+  model's context window without exceeding the estimated input budget.
 - [x] Valid summary, surrounding prose, code fence, extra key, missing key,
   empty value, Unicode-overlong L1, and empty model response.
 - [x] No model/auth, model rejection, timeout, cancellation, and publish error
@@ -155,42 +176,49 @@ The model must return exactly one JSON object and no Markdown fence:
 - [x] A normal Pi work interval with modified files creates one queryable
   Episode before shutdown or rollover completes, or leaves an explicitly
   pending Capture.
-- [x] The Episode summary covers only the Capture interval, not the whole Pi
-  Conversation.
+- [x] The Episode summary covers the full Capture interval, not ancestors from
+  before the Capture or only a recent tail.
 - [x] Injected Madeleine context cannot recursively become memory.
 - [x] No summary failure loses paths or prevents later retry.
 
 ## Excluded from this PR
 
-Automatic background retry of older pending summaries, end-to-end crash
-hardening, additional summarizer providers, and past transcript import.
+Automatic background retry of older pending summaries, persistence of raw and
+intermediate summary evidence, end-to-end crash hardening, additional summarizer
+providers, and past transcript import.
 
 ## Implementation revisions and decision ledger
 
 Listed least-confident first:
 
-1. Projection limits are character-based: 48,000 total characters, 4,000 per
-   entry, and 8,000 for projected path metadata. If the path list alone exceeds
-   its projection budget, the prompt reports the omitted count; the complete
-   authoritative path set still remains frozen in the Capture and is published
-   to the Episode. The first user goal is reserved, then every other entry
-   competes newest-first regardless of type before selected entries are rendered
-   chronologically. This replaced an initial policy that prioritized every
-   branch summary and could omit the latest outcome. The plan required named
-   bounds but did not initially specify values or cross-type selection.
-2. L2's 300-800 token range is enforced through the prompt, not a local token
+1. An initial fixed projection limit of 48,000 characters was removed after
+   clarifying that one Capture spans an entire Pi session and commonly exceeds
+   a model context window. The adapter now preserves all sanitized semantic
+   evidence, sizes calls from `ctx.model.contextWindow`, and recursively
+   summarizes chronological chunks only when required. It reserves 1,200 output
+   tokens plus the larger of 1,024 tokens or 5% of the model context as an
+   estimation margin. Each model call has its own 30-second timeout, so a large
+   Capture can take longer than 30 seconds overall. Calls are sequential, and
+   each hierarchy level must reduce the estimated evidence size or fail visibly.
+   These values were not specified by the original plan.
+2. Mutation projection intentionally stores only operation, path, status, and a
+   failed-operation error capped at 1,000 Unicode characters. Complete write
+   bodies, edit replacements, successful result prose, and reads mostly repeat
+   code already available through navigation and were consuming session-scale
+   summary context without adding durable intent.
+3. L2's 300-800 token range is enforced through the prompt, not a local token
    counter. The strict parser validates shape, types, non-empty trimmed strings,
    and L1's Unicode limit as specified; adding a provider-specific tokenizer for
    an approximate prose target would add dependency and model-coupling cost.
-3. Explicit retry reconstructs a pending Capture's `FinalizationDraft` by
+4. Explicit retry reconstructs a pending Capture's `FinalizationDraft` by
    idempotently calling `capture.seal` with its persisted end cursor. This keeps
    Capture paths authoritative without adding another RPC method or exposing
    persistence details through the adapter.
-4. `rpc.ts` and `package.json` were added to the implementation file set because
+5. `rpc.ts` and `package.json` were added to the implementation file set because
    the existing TypeScript client did not expose the already-supported
    `episode.publish` RPC and the two new runtime modules must ship in the npm
    package. No Go API or protocol method was added.
-5. Entire CLI commit `60773bd4b89e487a897958b00a1d168a7ea5aa01` was inspected.
+6. Entire CLI commit `60773bd4b89e487a897958b00a1d168a7ea5aa01` was inspected.
    Parent-chain branch selection and condensed Pi projection mechanics were
    adapted from `cmd/entire/cli/agent/pi/pijsonl/pijsonl.go`,
    `cmd/entire/cli/agent/pi/transcript.go`, and
@@ -199,12 +227,12 @@ Listed least-confident first:
    do not fit Madeleine's in-memory cursor boundaries and active Pi model. The
    existing MIT attribution in `NOTICE` and `harnesses/pi/NOTICE` already names
    this commit.
-6. After implementation review, branch-summary entries were added to
+7. After implementation review, branch-summary entries were added to
    projection. Pi persists these as top-level `branch_summary` entries; the
    `branchSummary` role is only their derived model-context representation.
    Including the stored summary preserves useful context from an abandoned
    branch without traversing that branch's raw entries.
-7. Pi compaction summaries are omitted from L1/L2 input. Pi retains the original
+8. Pi compaction summaries are omitted from L1/L2 input. Pi retains the original
    messages in its append-only transcript, so including both duplicates content;
    additionally, a compaction can summarize ancestors from before the Capture
    boundary. The exact raw messages between the Capture cursors remain the

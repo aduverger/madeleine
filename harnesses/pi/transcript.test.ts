@@ -2,7 +2,7 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
 import {
-  maxProjectionCharacters,
+  maxMutationErrorCharacters,
   projectCaptureTranscript,
   stripMadeleineContext,
 } from "./transcript.ts";
@@ -138,16 +138,31 @@ describe("projectCaptureTranscript", () => {
     expect(projection).not.toContain("Compacted summary that may include pre-Capture context.");
   });
 
-  it("omits reads and binary content while retaining bounded mutation details", () => {
+  it("keeps mutation metadata without read, file-content, result, or binary bulk", () => {
     const entries = [
       custom("start", null),
       user("goal", "start", "change a file"),
       assistant("calls", "goal", [
         { type: "toolCall", id: "read", name: "read", arguments: { path: "secret.txt" } },
-        { type: "toolCall", id: "write", name: "write", arguments: { path: "src/a.ts", content: "new" } },
+        {
+          type: "toolCall",
+          id: "write",
+          name: "write",
+          arguments: { path: "src/a.ts", content: "distinctive-write-payload" },
+        },
+        {
+          type: "toolCall",
+          id: "edit",
+          name: "edit",
+          arguments: {
+            path: "src/b.ts",
+            oldText: "distinctive-old-text",
+            newText: "distinctive-new-text",
+          },
+        },
       ]),
       toolResult("read-result", "calls", "read", "large secret output"),
-      toolResult("write-result", "read-result", "write", "wrote file"),
+      toolResult("write-result", "read-result", "write", "successful write result prose"),
       entry("image", "write-result", {
         role: "user",
         content: [{ type: "image", data: "base64-payload", mimeType: "image/png" }],
@@ -156,11 +171,29 @@ describe("projectCaptureTranscript", () => {
     ];
 
     const projection = projectCaptureTranscript(entries, "start", "image", ["src/a.ts"]);
-    expect(projection).toContain("[Mutation write]");
+    expect(projection).toContain("[Mutation write]\nPath: src/a.ts");
+    expect(projection).toContain("[Mutation edit]\nPath: src/b.ts");
     expect(projection).toContain("[Mutation result write: success]");
     expect(projection).not.toContain("secret.txt");
+    expect(projection).not.toContain("distinctive-write-payload");
+    expect(projection).not.toContain("distinctive-old-text");
+    expect(projection).not.toContain("distinctive-new-text");
     expect(projection).not.toContain("large secret output");
+    expect(projection).not.toContain("successful write result prose");
     expect(projection).not.toContain("base64-payload");
+  });
+
+  it("retains a bounded error for a failed mutation", () => {
+    const error = `permission denied ${"x".repeat(maxMutationErrorCharacters)}`;
+    const entries = [
+      custom("start", null),
+      toolResult("failure", "start", "edit", error, true),
+    ];
+
+    const projection = projectCaptureTranscript(entries, "start", "failure", []);
+    expect(projection).toContain("[Mutation result edit: failure]\npermission denied");
+    expect(projection).toContain("… [truncated]");
+    expect(projection).not.toContain(error);
   });
 
   it("recursively removes complete Madeleine context blocks", () => {
@@ -168,29 +201,18 @@ describe("projectCaptureTranscript", () => {
     expect(stripMadeleineContext(injected)).toBe("before  after");
   });
 
-  it("bounds total input while preserving the first goal and newest entries", () => {
-    const entries: SessionEntry[] = [custom("start", null), user("goal", "start", "first goal")];
-    let parent = "goal";
-    for (let index = 0; index < 12; index++) {
-      const id = `summary-${index}`;
-      entries.push({
-        type: "branch_summary",
-        id,
-        parentId: parent,
-        timestamp: "2026-01-01T00:00:00Z",
-        fromId: parent,
-        summary: `${index}:${"x".repeat(5000)}`,
-      });
-      parent = id;
-    }
-    entries.push(toolResult("latest", parent, "write", `latest:${"y".repeat(5000)}`));
+  it("does not discard long in-bound conversational evidence", () => {
+    const early = `early:${"x".repeat(50_000)}`;
+    const late = `late:${"y".repeat(50_000)}`;
+    const entries = [
+      custom("start", null),
+      user("goal", "start", early),
+      assistant("answer", "goal", [{ type: "text", text: late }]),
+    ];
 
-    const projection = projectCaptureTranscript(entries, "start", "latest", []);
-    expect(projection.length).toBeLessThanOrEqual(maxProjectionCharacters);
-    expect(projection).toContain("first goal");
-    expect(projection).toContain("[Branch summary]\n11:");
-    expect(projection).toContain("[Mutation result write: success]\nlatest:");
-    expect(projection).not.toContain("[Branch summary]\n0:");
+    const projection = projectCaptureTranscript(entries, "start", "answer", []);
+    expect(projection).toContain(early);
+    expect(projection).toContain(late);
   });
 
   it("rejects missing or unrelated boundaries instead of summarizing the full session", () => {

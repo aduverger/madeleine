@@ -7,10 +7,11 @@ Design decisions: D-003, D-004, D-006, D-016, D-017, D-021, D-022, D-023, D-025
 ## Goal
 
 Make the evidence behind an Episode durable and agent-accessible. At Capture
-sealing, Pi must submit a cursor-bounded, sanitized transcript to Madeleine;
-Madeleine persists it under a generated Transcript ID, uses its compact view for
-L1/L2 generation, and exposes both `compact` and `raw` views without depending
-on the original Pi session file.
+sealing, Pi must submit a cursor-bounded, sanitized semantic transcript to
+Madeleine. Madeleine persists it under a generated Transcript ID; Pi derives a
+model-sized compact view from that evidence, generates L1/L2, and atomically
+publishes the compact view with the Episode. Retrieval exposes both `compact`
+and `raw` without depending on the original Pi session file.
 
 ## Entire reuse gate
 
@@ -57,7 +58,7 @@ Transcript --1..n--> TranscriptEntry
 
 - [ ] Generate a UUIDv7 Transcript ID when a non-empty Capture is first sealed.
 - [ ] Add `transcripts` with Capture, Repository, Conversation, harness, format
-  version, source start/end cursors, nullable-until-prepared compact text,
+  version, source start/end cursors, nullable-until-publication compact text,
   timestamps, and a unique Capture relationship.
 - [ ] Add `transcript_entries` keyed by `(transcript_id, position)` with a stable
   entry kind and versioned JSON content.
@@ -84,16 +85,18 @@ cursor.
 - [ ] Define a versioned structured-entry payload shared by sealing, retry,
   summary, and retrieval.
 - [ ] Store chronological user text, assistant text, branch summaries, and
-  structured `edit`/`write` calls and results with success/failure.
+  structured `edit`/`write` operation, path, and success/failure metadata.
+- [ ] Retain a short bounded error for failed mutations, but omit write content,
+  edit old/new text, and successful mutation result prose.
 - [ ] Exclude Pi `compaction` entries. Pi retains the original messages, and a
   compaction may summarize ancestors outside the Capture boundary.
-- [ ] Exclude read outputs, image/audio bodies, thinking, custom state,
+- [ ] Exclude read calls and outputs, image/audio bodies, thinking, custom state,
   unrelated tool-result bulk, and complete Madeleine-context blocks.
-- [ ] Preserve entry kinds and mutation inputs as structured JSON rather than
-  storing only one rendered prompt string.
-- [ ] Apply named per-entry and total stored-transcript limits. Reject an
-  oversized transcript before sealing rather than silently claiming complete
-  raw evidence.
+- [ ] Preserve entry kinds and sanitized mutation metadata as structured JSON
+  rather than storing only one rendered prompt string.
+- [ ] Do not impose an arbitrary total transcript limit: one Capture spans a
+  complete session interval and may legitimately exceed a model context window.
+  Bound RPC framing and retrieved pages without discarding accepted entries.
 - [ ] Mark both views as untrusted historical data at every model and tool
   boundary.
 
@@ -105,26 +108,25 @@ transcript; they are not new L3/L4 summary levels.
 ### Raw
 
 - [ ] Return the canonical chronological entries without Pi compaction entries.
-- [ ] Preserve more text than the compact view while retaining the explicit
-  exclusions and storage limits above.
+- [ ] Preserve the full sanitized semantic text while retaining the explicit
+  exclusions above; it may equal compact evidence when no chunking is needed.
 - [ ] Page by stable entry position with a bounded page size and `next_offset`.
 - [ ] Never read the original Pi JSONL file during retrieval.
 
 ### Compact
 
-- [ ] Deterministically render the canonical entries using Plan 10's projection
-  policy and named prompt limits.
-- [ ] Reserve the first user goal and authoritative structured paths, then
-  select all other entries newest-first without giving messages, mutations, or
-  branch summaries different truncation priority.
-- [ ] Persist the exact compact text passed to the L1/L2 model so later evidence
-  retrieval shows what the summarizer saw.
+- [ ] Render the full semantic projection using Plan 10's policy and
+  authoritative structured paths.
+- [ ] If it fits the active model, use that projection directly. Otherwise use
+  Plan 10's model-context-sized chronological chunk summaries and recursive
+  synthesis to produce compact evidence.
+- [ ] Persist the exact final compact evidence passed to the successful L1/L2
+  model call so later retrieval shows what the summarizer saw.
 - [ ] Return compact text in one bounded response.
 
 ## Atomic sealing and recovery
 
-- [ ] Extend `capture.seal` to accept the versioned bounded structured entries;
-  compact text is prepared only after sealing returns authoritative paths.
+- [ ] Extend `capture.seal` to accept the versioned structured entries.
 - [ ] In one SQLite transaction, validate the open Capture, determine whether it
   has paths, insert its Transcript and entries when non-empty, set end boundary
   and `transcript_id`, and transition to `pending_summary` or `abandoned`.
@@ -132,16 +134,17 @@ transcript; they are not new L3/L4 summary levels.
 - [ ] Make identical seal retries idempotent. Reject a different transcript for
   an already-sealed Capture as a conflict.
 - [ ] Return `transcript_id`, paths, and status in `FinalizationDraft`.
-- [ ] Add an idempotent `transcript.prepare_compact` operation that sets compact
-  text once. An identical retry succeeds; different text conflicts.
-- [ ] After sealing, render compact text from the persisted structured entries
-  and returned authoritative paths, persist it, then generate L1/L2 from that
-  exact stored text.
-- [ ] Explicit and background retries load compact text by Transcript ID. If a
-  crash left it unset, reconstruct it from persisted entries and Capture paths,
-  then set it through the same operation. Neither path reads the Pi session file.
-- [ ] If projection or atomic sealing fails, keep the Capture open. If summary or
-  publication fails after sealing, keep the Capture and Transcript pending.
+- [ ] Extend `episode.publish` to accept the exact compact evidence used for its
+  L1/L2. Store compact text, insert the Episode, and finalize the Capture in the
+  existing publication transaction.
+- [ ] Make an identical publication retry succeed; reject different compact
+  evidence or summaries for an already-published Episode.
+- [ ] Explicit and background retries reconstruct semantic projection from
+  persisted entries and Capture paths, then rerun Plan 10's context-sized
+  compaction using the active retry model. They never read the Pi session file.
+- [ ] If projection or atomic sealing fails, keep the Capture open. If model or
+  publication fails after sealing, keep the raw Transcript pending; compact text
+  becomes immutable only when Episode publication succeeds.
 
 ## Retrieval API and Pi tool
 
@@ -162,12 +165,15 @@ transcript; they are not new L3/L4 summary levels.
 
 ## Summary integration
 
-- [ ] Keep Plan 10's strict L1/L2 JSON contract and active-model call unchanged.
-- [ ] Feed the persisted compact view to the model exactly once per attempt.
-- [ ] Include authoritative Capture paths returned by sealing in compact text
-  before preparing the Transcript for summary.
-- [ ] Do not store prompt instructions, model identity, raw model response, or
-  hidden reasoning in Transcript records.
+- [ ] Keep Plan 10's strict final L1/L2 JSON contract, semantic projection, and
+  active-model chunking unchanged.
+- [ ] Include authoritative Capture paths returned by sealing before deciding
+  whether projection requires intermediate compaction.
+- [ ] Publish the exact final evidence given to the successful L1/L2 call as the
+  Transcript's compact view.
+- [ ] Do not store prompt instructions, model identity, raw model response,
+  discarded intermediate hierarchy levels, or hidden reasoning in Transcript
+  records. The final combined segment summaries remain part of compact evidence.
 - [ ] Treat an existing identical Episode publication as success.
 
 ## Tests
@@ -179,13 +185,14 @@ transcript; they are not new L3/L4 summary levels.
 - [ ] Raw view excludes compaction entries but retains original messages across
   a compaction.
 - [ ] Branch summaries are retained without traversing abandoned raw branches.
-- [ ] Read output, binary content, custom state, thinking, and recursive
-  Madeleine context are excluded.
+- [ ] Read calls/output, edit/write bodies, successful result prose, binary
+  content, custom state, thinking, and recursive Madeleine context are excluded.
 - [ ] Atomic seal success, empty abandonment, identical retry, conflicting
-  retry, oversized transcript, and transaction rollback.
-- [ ] Crash between sealing and compact preparation recovers from persisted
-  entries and paths without the Pi session file.
-- [ ] Summary input exactly equals persisted compact text.
+  retry, large session-scale transcript, and transaction rollback.
+- [ ] Crash after sealing recovers from persisted entries and paths without the
+  Pi session file.
+- [ ] The evidence portion of the successful final summary prompt exactly
+  equals persisted compact text.
 - [ ] Summary and publish failures leave Transcript-linked pending Captures.
 - [ ] Retry succeeds after deleting or moving the original Pi session file.
 - [ ] Compact retrieval, multi-page raw retrieval, invalid offset/view, missing
@@ -200,7 +207,8 @@ transcript; they are not new L3/L4 summary levels.
   an Episode without accessing a Pi session file.
 - [ ] The compact evidence is byte-for-byte the source used for L1/L2.
 - [ ] No Pi compaction summary can introduce pre-Capture Conversation content.
-- [ ] A summary failure preserves all data required for retry in SQLite.
+- [ ] A chunk, summary, or publication failure preserves all data required for
+  retry in SQLite.
 - [ ] No database or public RPC response stores or exposes a transcript file
   path.
 
@@ -215,22 +223,27 @@ summaries.
 
 Listed least-confident first:
 
-1. "Raw" means the fullest persisted Madeleine evidence view, not a byte copy of
-   Pi's JSONL. It deliberately excludes bulk and privileged/internal content
-   that is not useful file-intent evidence. This interpretation keeps the new
-   storage aligned with Madeleine's retrieval purpose and the user's request to
-   persist the bounded transcript used by summarization.
-2. Compact text is stored in addition to structured entries. It is derivable,
-   but persisting it proves exactly what the summary model saw and prevents a
-   later renderer change from rewriting an Episode's evidence.
-3. Structured Transcript insertion is part of `capture.seal`, rather than a
-   separate `transcript.put` followed by sealing. This avoids a crash window
-   containing a sealed Capture whose only evidence still lives in a harness
-   file. Compact text is set afterward because only sealing returns the frozen
-   authoritative paths; a crash in between is recoverable from SQLite.
-4. Pi compaction summaries are excluded from both views. The append-only raw
+1. "Raw" means the fullest persisted Madeleine semantic evidence view, not a
+   byte copy of Pi's JSONL. It deliberately excludes reads, file-content tool
+   payloads, successful result prose, and privileged/internal content that do
+   not improve file-intent evidence. User, assistant, and branch-summary text
+   remain complete even when the session exceeds a model context window.
+2. No arbitrary total storage limit is planned. Cursor bounds and semantic
+   filtering define Transcript scope; model context limits define chunk size,
+   while RPC framing and retrieval pagination bound individual operations.
+3. Compact text is stored in addition to structured entries. It may contain
+   Capture-specific model-generated chunk summaries, so it is not
+   deterministically derivable. Persisting it proves exactly what the final
+   summary model saw and prevents a later attempt or renderer change from
+   rewriting a published Episode's evidence.
+4. Structured Transcript insertion is part of `capture.seal`, rather than a
+   separate `transcript.put` followed by sealing. Compact evidence is stored
+   atomically with Episode publication, avoiding a separate mutable
+   `prepare_compact` state while keeping every failed attempt recoverable from
+   raw SQLite entries.
+5. Pi compaction summaries are excluded from both views. The append-only raw
    messages remain available, while the summary's semantic start boundary is
    not reliably limited to the Capture start cursor.
-5. The existing recovery/MVP plan was moved from Plan 11 to Plan 12 so final
+6. The existing recovery/MVP plan was moved from Plan 11 to Plan 12 so final
    end-to-end hardening validates persisted evidence rather than immediately
    obsolete transcript references.

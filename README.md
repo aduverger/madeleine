@@ -76,8 +76,10 @@ Episode context is disclosed in layers:
 1. **L1** — one or two sentences, attached automatically when a file is read.
 2. **L2** — a longer brief containing goals, decisions, rationale, actions,
    tests, and caveats; requested only when an Episode looks useful.
-3. **Compact Transcript** — the exact bounded evidence used to generate L1/L2.
-4. **Raw Transcript** — the fuller sanitized, cursor-bounded structured entries,
+3. **Compact Transcript** — the exact final evidence used to generate L1/L2,
+   after Capture-specific chunking when a session exceeds the active model's
+   context window.
+4. **Raw Transcript** — the fuller sanitized, cursor-bounded semantic entries,
    available in pages.
 
 Madeleine persists both Transcript views by generated ID. It does not depend on
@@ -96,11 +98,13 @@ Capture stores successful structured file mutations
     ↓
 Capture is sealed on exit, session transition, or manual rollover
     ↓
-bounded compact/raw Transcript evidence is persisted
+sanitized semantic Transcript entries are persisted
     ↓
-L1 and L2 are generated from the persisted compact view
+Capture evidence is chunked only when it exceeds the active model context
     ↓
-immutable Episode is published
+L1 and L2 are generated from final compact evidence
+    ↓
+compact evidence and immutable Episode are published atomically
 ```
 
 Persisted Capture paths make unfinished work recoverable after a crash. Reopening
@@ -117,6 +121,7 @@ It will provide:
 - a thin Pi TypeScript extension;
 - automatic L1 context after successful file reads;
 - explicit L2 and compact/raw Transcript retrieval through Pi tools;
+- semantic Transcript evidence without read output or edit/write file bodies;
 - immediate recording of successful `edit` and `write` operations;
 - deliberate Capture rollover within a long-running Pi session;
 - clean shutdown, hot-reload, and crash-reattachment semantics;

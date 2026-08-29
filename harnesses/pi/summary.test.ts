@@ -1,4 +1,8 @@
-import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
+import {
+  estimateTokens,
+  type ExtensionContext,
+  type SessionEntry,
+} from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Capture, Episode, FinalizationDraft } from "./rpc.ts";
@@ -6,6 +10,7 @@ import {
   EpisodeFinalizer,
   generateSummary,
   maxL1Characters,
+  summaryInputTokenLimit,
   summaryMaxTokens,
   summaryTimeoutMs,
   validateSummary,
@@ -53,7 +58,9 @@ function context(options: {
     options.response ?? JSON.stringify({ l1: "Short summary", l2: "Detailed brief" }),
   )));
   const ctx = {
-    model: options.model === null ? undefined : (options.model ?? { id: "active-model" }),
+    model: options.model === null
+      ? undefined
+      : (options.model ?? { id: "active-model", contextWindow: 128_000 }),
     modelRegistry: {
       hasConfiguredAuth: () => options.authenticated ?? true,
       complete,
@@ -164,6 +171,61 @@ describe("generateSummary", () => {
     expect(transcriptEntries).toEqual(entriesBefore);
   });
 
+  it("summarizes oversized semantic evidence in model-sized chunks before final synthesis", async () => {
+    let segment = 0;
+    const complete = vi.fn(async (_model: unknown, modelContext: any) => {
+      const prompt = modelContext.messages[0].content[0].text as string;
+      if (prompt.startsWith("Create a Madeleine Episode summary")) {
+        return modelResponse('{"l1":"Chunked summary","l2":"Combined segment evidence"}');
+      }
+      segment++;
+      return modelResponse(`segment summary ${segment}`);
+    });
+    const model = { id: "small-model", contextWindow: 4_000 };
+    const { ctx } = context({ complete, model });
+
+    await expect(generateSummary(`start\n\n${"evidence ".repeat(4_000)}\n\nend`, ctx)).resolves.toEqual({
+      l1: "Chunked summary",
+      l2: "Combined segment evidence",
+    });
+
+    expect(segment).toBeGreaterThan(1);
+    expect(complete).toHaveBeenCalledTimes(segment + 1);
+    const inputLimit = summaryInputTokenLimit(model as any);
+    for (const call of complete.mock.calls) {
+      const prompt = call[1].messages[0].content[0].text;
+      expect(estimateTokens({ role: "user", content: prompt, timestamp: 0 })).toBeLessThanOrEqual(inputLimit);
+    }
+    const finalPrompt = complete.mock.calls.at(-1)![1].messages[0].content[0].text;
+    expect(finalPrompt).toContain("segment summary 1");
+    expect(finalPrompt).not.toContain("evidence evidence evidence");
+  });
+
+  it("compacts segment summaries again when one hierarchy level does not fit", async () => {
+    let secondLevelCalls = 0;
+    const complete = vi.fn(async (_model: unknown, modelContext: any) => {
+      const prompt = modelContext.messages[0].content[0].text as string;
+      if (prompt.startsWith("Create a Madeleine Episode summary")) {
+        return modelResponse('{"l1":"Recursive summary","l2":"All levels combined"}');
+      }
+      if (prompt.includes("first-level segment")) {
+        secondLevelCalls++;
+        return modelResponse("second-level segment");
+      }
+      return modelResponse(`first-level segment ${"x".repeat(1_500)}`);
+    });
+    const { ctx } = context({ complete, model: { id: "small-model", contextWindow: 4_000 } });
+
+    await expect(generateSummary("original evidence ".repeat(4_000), ctx)).resolves.toEqual({
+      l1: "Recursive summary",
+      l2: "All levels combined",
+    });
+
+    expect(secondLevelCalls).toBeGreaterThan(0);
+    const finalPrompt = complete.mock.calls.at(-1)![1].messages[0].content[0].text;
+    expect(finalPrompt).toContain("second-level segment");
+  });
+
   it.each([
     ["missing model", { model: null }],
     ["missing authentication", { authenticated: false }],
@@ -176,6 +238,13 @@ describe("generateSummary", () => {
   it("preserves model rejection", async () => {
     const { ctx } = context({ complete: async () => { throw new Error("provider rejected"); } });
     await expect(generateSummary("projection", ctx)).rejects.toThrow("provider rejected");
+  });
+
+  it("rejects a truncated model response", async () => {
+    const { ctx } = context({
+      complete: async () => ({ ...modelResponse("partial"), stopReason: "length" }),
+    });
+    await expect(generateSummary("projection", ctx)).rejects.toThrow("stopped with length");
   });
 
   it("aborts the model after the summary timeout", async () => {
