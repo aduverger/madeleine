@@ -32,12 +32,9 @@ type Tx struct {
 }
 
 func Open(ctx context.Context, configuredHome string) (*DB, error) {
-	home, err := resolveHome(configuredHome)
+	home, err := prepareHome(configuredHome)
 	if err != nil {
-		return nil, fmt.Errorf("resolve store home %q: %w", configuredHome, err)
-	}
-	if err := os.MkdirAll(home, 0o700); err != nil {
-		return nil, fmt.Errorf("create store home %q: %w", home, err)
+		return nil, err
 	}
 
 	db, err := openSQLite(filepath.Join(home, databaseName))
@@ -78,6 +75,37 @@ func (db *DB) WithTransaction(ctx context.Context, operation func(*Tx) error) er
 		return err
 	}
 	return transaction.Commit()
+}
+
+func CheckHomeAccess(configuredHome string) error {
+	home, err := prepareHome(configuredHome)
+	if err != nil {
+		return err
+	}
+	file, err := os.CreateTemp(home, ".madeleine-write-check-*")
+	if err != nil {
+		return fmt.Errorf("write store home %q: %w", home, err)
+	}
+	name := file.Name()
+	if err := file.Close(); err != nil {
+		_ = os.Remove(name)
+		return fmt.Errorf("close store home check %q: %w", home, err)
+	}
+	if err := os.Remove(name); err != nil {
+		return fmt.Errorf("remove store home check %q: %w", home, err)
+	}
+	return nil
+}
+
+func prepareHome(configuredHome string) (string, error) {
+	home, err := resolveHome(configuredHome)
+	if err != nil {
+		return "", fmt.Errorf("resolve store home %q: %w", configuredHome, err)
+	}
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		return "", fmt.Errorf("create store home %q: %w", home, err)
+	}
+	return home, nil
 }
 
 func resolveHome(configured string) (string, error) {
