@@ -116,6 +116,22 @@ describe("projectCaptureTranscript", () => {
     expect(projection).not.toContain("raw abandoned work");
   });
 
+  it("includes a branch summary used as the root Capture boundary", () => {
+    const entries: SessionEntry[] = [{
+      type: "branch_summary",
+      id: "summary",
+      parentId: null,
+      timestamp: "2026-01-01T00:00:00Z",
+      fromId: "old-leaf",
+      summary: "Context carried from the previous branch.",
+    }];
+
+    expect(extractCaptureTranscript(entries, "summary", "summary").entries).toEqual([{
+      kind: "branch_summary",
+      text: "Context carried from the previous branch.",
+    }]);
+  });
+
   it("uses raw bounded messages and omits a compaction summary", () => {
     const entries: SessionEntry[] = [
       custom("start", null),

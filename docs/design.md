@@ -211,12 +211,15 @@ entries so a reload does not duplicate historical context.
 
 ### Tree navigation
 
-Navigation within the active Capture's branch keeps that Capture open. Before
-`/tree` moves to a branch where the Capture start cursor is no longer an
-ancestor, the adapter seals the old interval at the source leaf. It cancels
-navigation if sealing cannot preserve that interval, otherwise it starts a new
-Capture from the selected destination after navigation. This applies whether or
-not Pi creates a branch summary.
+Navigation within the active Capture's branch keeps that Capture open. The
+adapter computes Pi's effective destination first: selecting a user or custom
+message targets its parent, while other selections target the entry itself.
+Before `/tree` crosses the Capture boundary, Madeleine seals the old interval at
+the source leaf and opens a temporary source Capture. If Pi's optional branch
+summary fails or is cancelled, that Capture continues recording on the unchanged
+branch. After successful navigation, Madeleine abandons the unused temporary
+Capture and starts the destination Capture. A generated branch summary is the
+first semantic entry inside that destination boundary.
 
 ### Crash and resume
 
@@ -297,10 +300,12 @@ append-only raw messages remain available across compaction, while a compaction
 summary may contain ancestors from before the Capture boundary.
 
 The Pi adapter exposes `madeleine_transcript` for repository-scoped compact or
-raw retrieval. SQLite returns stable position-based pages; the adapter exposes
-the largest complete entry prefix that fits Pi's escaped output bound and points
-to the first hidden entry. Pagination remains visible even when one oversized
-entry itself must be truncated. These are evidence views, not generated L3/L4
+raw retrieval. SQLite returns stable position-based pages bounded by both entry
+count and encoded size, except that one indivisible entry is always returned;
+the adapter then exposes the largest complete prefix
+that fits Pi's smaller escaped output bound and points to the first hidden
+entry. Pagination remains visible even when one oversized entry itself must be
+truncated. These are evidence views, not generated L3/L4
 summaries, and no retrieval depends on the original Pi session file.
 
 ### Injection safety

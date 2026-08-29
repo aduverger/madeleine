@@ -68,6 +68,7 @@ export interface CaptureClient extends SummaryClient {
     signal?: AbortSignal,
   ): Promise<Capture[]>;
   recordWrite(captureID: string, path: string, signal?: AbortSignal): Promise<void>;
+  abandonCapture(captureID: string, signal?: AbortSignal): Promise<void>;
   sealCapture(
     captureID: string,
     endCursor: string,
@@ -211,12 +212,12 @@ export class CaptureLifecycle {
     await this.createCapture(ctx);
   }
 
-  private async createCapture(ctx: ExtensionContext): Promise<void> {
+  private async createCapture(ctx: ExtensionContext, startCursor?: string): Promise<void> {
     if (!this.conversation) return;
     const capture = await this.client.startCapture(
       this.repositoryRoot,
       this.conversation.externalID,
-      this.state.ensureCursor(ctx),
+      startCursor ?? this.state.ensureCursor(ctx),
       this.workController.signal,
     );
     this.state.attachCapture(capture.id);
@@ -284,18 +285,15 @@ export class CaptureLifecycle {
     event: SessionBeforeTreeEvent,
     ctx: ExtensionContext,
   ): Promise<{ cancel: true } | undefined> {
+    this.replaceCaptureAfterTree = false;
     const captureID = this.captureID;
     if (!captureID) return;
 
     try {
+      const entries = ctx.sessionManager.getEntries();
       const capture = await this.client.getCapture(captureID, event.signal);
-      if (cursorIsAncestor(
-        ctx.sessionManager.getEntries(),
-        capture.start_cursor,
-        event.preparation.targetId,
-      )) {
-        return;
-      }
+      const destinationCursor = effectiveTreeDestination(entries, event.preparation.targetId);
+      if (cursorIsAncestor(entries, capture.start_cursor, destinationCursor)) return;
       if (!event.preparation.oldLeafId) throw new Error("Pi tree navigation has no source leaf");
 
       this.workController.abort();
@@ -308,6 +306,8 @@ export class CaptureLifecycle {
       if (result.status === "pending") {
         this.notifyOnce(ctx, "tree-summary", "Madeleine preserved the Capture, but its Episode remains pending.");
       }
+      this.resetCaptureWork();
+      await this.createCapture(ctx, event.preparation.oldLeafId);
       this.replaceCaptureAfterTree = true;
     } catch {
       if (this.captureID) this.workController = new AbortController();
@@ -316,12 +316,20 @@ export class CaptureLifecycle {
     }
   }
 
-  private async afterTree(_event: SessionTreeEvent, ctx: ExtensionContext): Promise<void> {
+  private async afterTree(event: SessionTreeEvent, ctx: ExtensionContext): Promise<void> {
     if (!this.replaceCaptureAfterTree) return;
     this.replaceCaptureAfterTree = false;
-    this.resetCaptureWork();
+    const sourceCaptureID = this.captureID;
     try {
-      await this.createCapture(ctx);
+      if (sourceCaptureID) {
+        await this.client.abandonCapture(sourceCaptureID, ctx.signal);
+        this.clearCurrentCapture(sourceCaptureID);
+      }
+      this.resetCaptureWork();
+      const startCursor = event.summaryEntry
+        ? event.summaryEntry.parentId ?? event.summaryEntry.id
+        : event.newLeafId ?? undefined;
+      await this.createCapture(ctx, startCursor);
     } catch {
       this.notifyOnce(ctx, "tree-start", "Madeleine could not start write capture on the selected branch.");
     }
@@ -376,10 +384,18 @@ export class CaptureLifecycle {
   }
 }
 
+function effectiveTreeDestination(entries: SessionEntry[], targetID: string): string | null {
+  const target = entries.find((entry) => entry.id === targetID);
+  if (!target) return null;
+  if (target.type === "custom_message") return target.parentId;
+  if (target.type === "message" && target.message.role === "user") return target.parentId;
+  return targetID;
+}
+
 function cursorIsAncestor(
   entries: SessionEntry[],
   ancestorID: string,
-  cursorID: string,
+  cursorID: string | null,
 ): boolean {
   const entriesByID = new Map(entries.map((entry) => [entry.id, entry]));
   const visited = new Set<string>();

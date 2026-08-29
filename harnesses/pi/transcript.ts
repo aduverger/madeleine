@@ -86,7 +86,10 @@ function captureBranch(
     branch.push(entry);
     cursor = entry.parentId;
   }
-  return branch.reverse();
+  branch.reverse();
+  const startEntry = entriesByID.get(startCursor);
+  if (startEntry?.type === "branch_summary") branch.unshift(startEntry);
+  return branch;
 }
 
 function projectEntry(

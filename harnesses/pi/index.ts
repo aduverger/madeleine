@@ -20,7 +20,6 @@ import { registerTranscriptTool } from "./transcript-tool.ts";
 
 interface MadeleineClient extends CaptureClient {
   doctor(repositoryRoot: string): Promise<DoctorCheck[]>;
-  abandonCapture(captureID: string, signal?: AbortSignal): Promise<void>;
   contextForPath(repositoryRoot: string, path: string, signal?: AbortSignal): Promise<FileContext[]>;
   getEpisode(repositoryRoot: string, episodeID: string, signal?: AbortSignal): Promise<EpisodeDetail>;
   getTranscript(

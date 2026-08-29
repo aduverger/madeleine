@@ -1,3 +1,4 @@
+import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
@@ -26,10 +27,7 @@ export function registerTranscriptTool(
     parameters: Type.Object(
       {
         transcript_id: Type.String({ description: "Transcript ID shown by madeleine_episode" }),
-        view: Type.Optional(Type.Union([
-          Type.Literal("compact"),
-          Type.Literal("raw"),
-        ], { default: "compact" })),
+        view: Type.Optional(StringEnum(["compact", "raw"] as const, { default: "compact" })),
         offset: Type.Optional(Type.Integer({ minimum: 0 })),
       },
       { additionalProperties: false },

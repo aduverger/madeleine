@@ -36,6 +36,11 @@ describe("madeleine_transcript", () => {
 
     expect(tool.parameters.required).toEqual(["transcript_id"]);
     expect(tool.parameters.additionalProperties).toBe(false);
+    expect(tool.parameters.properties.view).toMatchObject({
+      enum: ["compact", "raw"],
+      default: "compact",
+    });
+    expect(tool.parameters.properties.view.anyOf).toBeUndefined();
     const result = await tool.execute(
       "call-1",
       { transcript_id: "transcript-1" },

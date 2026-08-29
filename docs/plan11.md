@@ -209,8 +209,13 @@ transcript; they are not new L3/L4 summary levels.
   a compaction.
 - [x] Branch summaries are retained without traversing abandoned raw branches.
 - [x] Tree navigation before the active Capture boundary seals the source
-  interval and starts a destination Capture, with and without a branch summary;
-  preservation failure cancels navigation.
+  interval, keeps a fallback source Capture through Pi summarization, and starts
+  a destination Capture after navigation; preservation failure cancels
+  navigation and a generated branch summary becomes the destination's first
+  semantic entry.
+- [x] The ancestry check mirrors Pi's effective destination when selecting a
+  user or custom message, and aborted or failed branch summarization leaves the
+  source fallback Capture active.
 - [x] Read calls/output, edit/write bodies, successful result prose, binary
   content, custom state, thinking, and recursive Madeleine context are excluded.
 - [x] Atomic seal success, empty abandonment, identical retry, conflicting
@@ -223,8 +228,10 @@ transcript; they are not new L3/L4 summary levels.
 - [x] Retry succeeds after deleting or moving the original Pi session file.
 - [x] Compact retrieval, multi-page raw retrieval, invalid offset/view, missing
   Transcript, and cross-Repository denial.
-- [x] A raw database page exceeding Pi's output bound keeps every complete entry
-  reachable in order and leaves its next offset visible.
+- [x] Raw database pages exceeding the child-process or Pi output bound keep
+  every complete entry reachable in order and leave their next offset visible.
+- [x] The Transcript tool's enum schema is accepted by Google-compatible Pi
+  providers.
 - [x] `madeleine_episode` exposes Transcript ID and
   `madeleine_transcript` renders both untrusted views within Pi output bounds.
 
@@ -253,27 +260,32 @@ Plan 11 is implemented. A non-empty seal now atomically stores a generated
 Transcript and its structured entries. Summary and retry paths page those SQLite
 entries, render the authoritative Capture paths, and publish the exact final
 model evidence with the Episode in one transaction. Pi preserves an active
-Capture before tree navigation crosses its start boundary and exposes
-repository-safe, output-aware compact and raw retrieval without retaining a
-session-file reference.
+source Capture throughout tree navigation, retains generated branch summaries
+inside the destination Transcript, and exposes repository-safe, output-aware
+compact and raw retrieval without retaining a session-file reference.
 
 ## Plan revisions and decision ledger
 
 Listed least-confident first:
 
-1. SQLite raw retrieval uses a fixed maximum 50-entry page. The Pi adapter then
-   exposes the largest complete prefix that fits its escaped 50KB/2000-line
-   output wrapper and advances to the first hidden entry; pagination metadata is
-   outside truncatable content. If one entry alone exceeds the bound, Pi shows a
-   truncated version and advances past that entry. Intra-entry continuation is
-   deferred as disproportionate MVP complexity. A negative offset, a
-   compact-view offset, or a positive offset beyond available entries remains
-   invalid. The child-process transport permits at most 16 MiB so context-sized
-   compact evidence can reach the adapter.
+1. SQLite raw retrieval uses both a maximum 50-entry page and an 8 MiB encoded
+   entry budget, safely below the adapter's 16 MiB child-process output cap for
+   multi-entry pages. The Pi adapter then exposes the largest complete prefix
+   that fits its escaped 50KB/2000-line wrapper and advances to the first hidden
+   entry; pagination metadata is outside truncatable content. If one entry alone exceeds a bound,
+   the page still returns that entry and Pi may show a truncated version; an
+   entry above the transport cap remains unavailable through this RPC.
+   Intra-entry continuation is deferred as disproportionate MVP complexity. A
+   negative offset, compact-view offset, or positive offset beyond available
+   entries remains invalid.
 2. Before Pi tree navigation moves outside the active Capture boundary, the
-   adapter seals at the source leaf and starts a new Capture after navigation.
-   It cancels navigation when preservation fails. Navigation whose target still
-   descends from the Capture start cursor does not split the Capture.
+   adapter seals at the source leaf and immediately opens a fallback Capture on
+   that branch. Failed or cancelled Pi summarization therefore leaves capture
+   active. On successful navigation the empty fallback is abandoned and the
+   destination Capture begins before a generated branch summary so the summary
+   is retained. The ancestry check mirrors Pi's parent target for selected user
+   and custom messages. Navigation whose effective target still descends from
+   the Capture start cursor does not split the Capture.
 3. Mutation entries are emitted when an `edit` or `write` tool result matches a
    bounded-branch tool call. This stores operation, path, and success/failure at
    the chronological result position; incomplete calls without a result are
@@ -281,8 +293,9 @@ Listed least-confident first:
 4. Abandoning a sealed pending Capture deletes its unpublished Transcript after
    clearing the Capture relationship. Published Transcripts remain immutable;
    the existing abandon command continues to mean deleting unfinished data.
-5. `madeleine_transcript.view` is optional with a TypeBox default of `compact`.
-   `raw` must be selected explicitly before an offset is accepted.
+5. `madeleine_transcript.view` is an optional Pi `StringEnum` with a default of
+   `compact`, keeping Google tool schemas compatible. `raw` must be selected
+   explicitly before an offset is accepted.
 6. Transcript tables and relationships were added by editing the original
    migrations because the application has never shipped. No compatibility
    migration, dual-read, or legacy file-reference field remains.

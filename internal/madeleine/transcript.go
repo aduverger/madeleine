@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	TranscriptFormatVersion    = 1
-	rawTranscriptPageSize      = 50
-	maxMutationErrorCharacters = 1_000
+	TranscriptFormatVersion       = 1
+	rawTranscriptPageSize         = 50
+	rawTranscriptPageMaxJSONBytes = 8 * 1024 * 1024
+	maxMutationErrorCharacters    = 1_000
 )
 
 func validateTranscriptInput(input *TranscriptInput) error {
@@ -139,14 +140,46 @@ func (s *Service) GetTranscript(ctx context.Context, request TranscriptRequest) 
 	if request.Offset > 0 && len(records) == 0 {
 		return TranscriptView{}, wrapError("get Transcript", string(request.TranscriptID), ErrInvalidState)
 	}
+	var nextRecordOffset *int
 	if len(records) > rawTranscriptPageSize {
 		nextOffset := records[rawTranscriptPageSize].Position
-		view.NextOffset = &nextOffset
+		nextRecordOffset = &nextOffset
 		records = records[:rawTranscriptPageSize]
 	}
-	view.Entries, err = decodeTranscriptEntries(records)
+	entries, err := decodeTranscriptEntries(records)
 	if err != nil {
 		return TranscriptView{}, wrapError("get Transcript", string(request.TranscriptID), err)
 	}
+	visibleCount, err := rawTranscriptPageEntryCount(entries)
+	if err != nil {
+		return TranscriptView{}, wrapError("get Transcript", string(request.TranscriptID), err)
+	}
+	if visibleCount < len(entries) {
+		nextOffset := records[visibleCount].Position
+		view.NextOffset = &nextOffset
+		entries = entries[:visibleCount]
+	} else {
+		view.NextOffset = nextRecordOffset
+	}
+	view.Entries = entries
 	return view, nil
+}
+
+func rawTranscriptPageEntryCount(entries []TranscriptEntry) (int, error) {
+	totalBytes := 2 // JSON array brackets.
+	for index, entry := range entries {
+		encoded, err := json.Marshal(entry)
+		if err != nil {
+			return 0, err
+		}
+		separatorBytes := 0
+		if index > 0 {
+			separatorBytes = 1
+		}
+		if index > 0 && totalBytes+separatorBytes+len(encoded) > rawTranscriptPageMaxJSONBytes {
+			return index, nil
+		}
+		totalBytes += separatorBytes + len(encoded)
+	}
+	return len(entries), nil
 }
