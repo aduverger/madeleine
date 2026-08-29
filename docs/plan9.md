@@ -2,7 +2,7 @@
 
 PR scope: one PR  
 Depends on: `plan8.md`  
-Design decisions: D-004, D-005, D-006, D-007, D-011, D-014, D-016, D-021
+Design decisions: D-004, D-005, D-006, D-007, D-011, D-014, D-016, D-021, D-023
 
 ## Goal
 
@@ -22,11 +22,11 @@ operational status/abandon commands. Episode summarization starts in Plan 10.
 ## Files
 
 ```text
-extensions/madeleine/index.ts
-extensions/madeleine/state.ts
-extensions/madeleine/lifecycle.ts
-extensions/madeleine/commands.ts
-extensions/madeleine/*.test.ts
+harnesses/pi/index.ts
+harnesses/pi/state.ts
+harnesses/pi/lifecycle.ts
+harnesses/pi/commands.ts
+harnesses/pi/*.test.ts
 ```
 
 ## Persisted Pi state

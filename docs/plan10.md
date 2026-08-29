@@ -2,7 +2,7 @@
 
 PR scope: one PR  
 Depends on: `plan9.md`  
-Design decisions: D-003, D-006, D-013, D-016, D-017, D-021
+Design decisions: D-003, D-006, D-013, D-016, D-017, D-021, D-023
 
 ## Goal
 
@@ -22,11 +22,11 @@ immutable Episode. Any failure must leave `pending_summary` recoverable.
 ## Files
 
 ```text
-extensions/madeleine/transcript.ts
-extensions/madeleine/summary.ts
-extensions/madeleine/lifecycle.ts
-extensions/madeleine/commands.ts
-extensions/madeleine/*.test.ts
+harnesses/pi/transcript.ts
+harnesses/pi/summary.ts
+harnesses/pi/lifecycle.ts
+harnesses/pi/commands.ts
+harnesses/pi/*.test.ts
 ```
 
 ## Transcript boundaries
