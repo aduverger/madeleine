@@ -123,17 +123,12 @@ function selectWithinLimit(entries: ProjectedEntry[], paths: string[]): Projecte
   const fixedLength = formatProjection([], paths).length;
   const budget = Math.max(0, maxProjectionCharacters - fixedLength);
   const firstGoal = entries.find((entry) => entry.kind === "goal");
-  const required = entries.filter(
-    (entry) => entry.kind === "summary" || entry === firstGoal,
-  );
   const selected = new Set<ProjectedEntry>();
   let used = 0;
 
-  for (const entry of required) {
-    const cost = entry.text.length + 2;
-    if (used + cost > budget) break;
-    selected.add(entry);
-    used += cost;
+  if (firstGoal) {
+    selected.add(firstGoal);
+    used = firstGoal.text.length + 2;
   }
   for (let index = entries.length - 1; index >= 0; index--) {
     const entry = entries[index]!;

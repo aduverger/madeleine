@@ -114,8 +114,9 @@ transcript; they are not new L3/L4 summary levels.
 
 - [ ] Deterministically render the canonical entries using Plan 10's projection
   policy and named prompt limits.
-- [ ] Preserve the first user goal, branch summaries, authoritative structured
-  paths, and latest relevant entries when truncation is necessary.
+- [ ] Reserve the first user goal and authoritative structured paths, then
+  select all other entries newest-first without giving messages, mutations, or
+  branch summaries different truncation priority.
 - [ ] Persist the exact compact text passed to the L1/L2 model so later evidence
   retrieval shows what the summarizer saw.
 - [ ] Return compact text in one bounded response.

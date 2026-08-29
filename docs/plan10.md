@@ -58,8 +58,8 @@ harnesses/pi/*.test.ts
 - [x] Retain mutation tool names, relevant inputs, success/failure, and bounded
   textual results.
 - [x] Bound individual entries and total projection size with named constants;
-  preserve the first user goal, branch summaries, and latest relevant entries
-  when truncation is necessary.
+  reserve the first user goal, then select all other entries newest-first
+  regardless of whether they are messages, mutations, or branch summaries.
 - [x] Mark the projected transcript as untrusted source data in the prompt.
 
 ## Summary contract
@@ -138,7 +138,8 @@ The model must return exactly one JSON object and no Markdown fence:
   Capture spanning compaction through its raw messages.
 - [x] Read-output omission, mutation retention, binary-content omission, and
   recursive Madeleine-context stripping.
-- [x] Projection truncation preserves the required goal/summary/tail policy.
+- [x] Projection truncation preserves the first goal and selects recent
+  messages, mutations, and branch summaries without type-based priority.
 - [x] Valid summary, surrounding prose, code fence, extra key, missing key,
   empty value, Unicode-overlong L1, and empty model response.
 - [x] No model/auth, model rejection, timeout, cancellation, and publish error
@@ -172,8 +173,11 @@ Listed least-confident first:
    entry, and 8,000 for projected path metadata. If the path list alone exceeds
    its projection budget, the prompt reports the omitted count; the complete
    authoritative path set still remains frozen in the Capture and is published
-   to the Episode. The plan required named bounds but did not specify values or
-   how to reconcile an unbounded path list with a bounded model prompt.
+   to the Episode. The first user goal is reserved, then every other entry
+   competes newest-first regardless of type before selected entries are rendered
+   chronologically. This replaced an initial policy that prioritized every
+   branch summary and could omit the latest outcome. The plan required named
+   bounds but did not initially specify values or cross-type selection.
 2. L2's 300-800 token range is enforced through the prompt, not a local token
    counter. The strict parser validates shape, types, non-empty trimmed strings,
    and L1's Unicode limit as specified; adding a provider-specific tokenizer for

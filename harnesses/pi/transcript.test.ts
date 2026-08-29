@@ -168,31 +168,29 @@ describe("projectCaptureTranscript", () => {
     expect(stripMadeleineContext(injected)).toBe("before  after");
   });
 
-  it("bounds total input while preserving the first goal and latest activity", () => {
+  it("bounds total input while preserving the first goal and newest entries", () => {
     const entries: SessionEntry[] = [custom("start", null), user("goal", "start", "first goal")];
     let parent = "goal";
-    entries.push({
-      type: "compaction",
-      id: "compact",
-      parentId: parent,
-      timestamp: "2026-01-01T00:00:00Z",
-      summary: "important compacted decisions",
-      firstKeptEntryId: "goal",
-      tokensBefore: 1000,
-    });
-    parent = "compact";
-    for (let index = 0; index < 30; index++) {
-      const id = `assistant-${index}`;
-      entries.push(assistant(id, parent, [{ type: "text", text: `${index}:${"x".repeat(5000)}` }]));
+    for (let index = 0; index < 12; index++) {
+      const id = `summary-${index}`;
+      entries.push({
+        type: "branch_summary",
+        id,
+        parentId: parent,
+        timestamp: "2026-01-01T00:00:00Z",
+        fromId: parent,
+        summary: `${index}:${"x".repeat(5000)}`,
+      });
       parent = id;
     }
+    entries.push(toolResult("latest", parent, "write", `latest:${"y".repeat(5000)}`));
 
-    const projection = projectCaptureTranscript(entries, "start", parent, []);
+    const projection = projectCaptureTranscript(entries, "start", "latest", []);
     expect(projection.length).toBeLessThanOrEqual(maxProjectionCharacters);
     expect(projection).toContain("first goal");
-    expect(projection).not.toContain("important compacted decisions");
-    expect(projection).toContain("29:");
-    expect(projection).not.toContain("[Assistant]\n0:");
+    expect(projection).toContain("[Branch summary]\n11:");
+    expect(projection).toContain("[Mutation result write: success]\nlatest:");
+    expect(projection).not.toContain("[Branch summary]\n0:");
   });
 
   it("rejects missing or unrelated boundaries instead of summarizing the full session", () => {
