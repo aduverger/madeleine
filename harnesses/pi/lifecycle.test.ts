@@ -140,7 +140,7 @@ function setup(now: () => number = () => 0) {
   const lifecycle = new CaptureLifecycle(client, state, async () => true, now);
   lifecycle.register(pi.api);
   const context = testContext(pi);
-  return { pi, client, lifecycle, ...context };
+  return { pi, client, state, lifecycle, ...context };
 }
 
 function mutation(toolName: string, path: unknown, isError = false) {
@@ -188,6 +188,32 @@ describe("Capture lifecycle", () => {
 
     expect(client.calls.map((call) => call.method)).toEqual(["get"]);
     expect(lifecycle.currentCaptureID()).toBe("capture-existing");
+  });
+
+  it("preserves injected paths when fallback confirms the persisted Capture", async () => {
+    const { pi, client, state, lifecycle, ctx, externalID } = setup();
+    client.captures.push(captureRecord("capture-existing", externalID));
+    client.fail.add("get");
+    pi.entries.push({
+      type: "custom",
+      id: "state-existing",
+      parentId: "leaf-1",
+      customType: stateEntryType,
+      data: {
+        version: 1,
+        conversation_id: externalID,
+        capture_id: "capture-existing",
+        injected_paths: ["src/a.ts"],
+      },
+    });
+    pi.leaf = "state-existing";
+
+    await pi.emit("session_start", { type: "session_start", reason: "reload" }, ctx);
+
+    expect(client.calls.map((call) => call.method)).toEqual(["list"]);
+    expect(lifecycle.currentCaptureID()).toBe("capture-existing");
+    expect(state.claimPath("src/a.ts")).toBe(false);
+    expect(pi.entries).toHaveLength(1);
   });
 
   it("falls back to the Conversation's single open Capture when reload state is missing", async () => {

@@ -107,7 +107,7 @@ export class CaptureLifecycle {
     const openCaptures = await this.openCapturesForConversation();
     if (openCaptures.length === 1) {
       const captureID = openCaptures[0]!.id;
-      this.state.attachCapture(captureID);
+      if (captureID !== persistedCaptureID) this.state.attachCapture(captureID);
       this.captureID = captureID;
       return;
     }
