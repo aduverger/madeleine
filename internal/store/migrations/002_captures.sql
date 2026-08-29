@@ -26,7 +26,6 @@ CREATE INDEX captures_conversation_status_started_idx
 CREATE TABLE capture_paths (
     capture_id TEXT NOT NULL REFERENCES captures(id),
     path TEXT NOT NULL,
-    source TEXT NOT NULL CHECK(source IN ('tool', 'git')),
     first_seen_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
     PRIMARY KEY(capture_id, path)

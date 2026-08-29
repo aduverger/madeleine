@@ -61,10 +61,11 @@ Their responsibilities remain separate:
 `live` and `history` are descriptions of lifecycle state, not additional domain
 objects or storage layers.
 
-For the Pi MVP, one Pi runtime produces one Episode. Resuming the same
-Conversation starts a new Capture rather than extending old history. This keeps
-completed work immutable while allowing future checkpoints or longer-running
-workflows.
+For the Pi MVP, one Capture spans work in a Pi Conversation until a clean
+session transition, process exit, or explicit `/madeleine rollover`. Hot reload
+and restart after an abrupt process exit reattach the same open Capture. This
+keeps Episodes deliberately coarse while allowing the user to create a boundary
+inside a long-running session.
 
 ## Progressive context
 
@@ -83,22 +84,20 @@ More elaborated ranking mechanisms will be explored in the future.
 ## How an Episode is created
 
 ```text
-agent run starts
+agent run starts or resumes
     ↓
-Capture stores successful file writes
+Capture stores successful structured file mutations
     ↓
-Git reconciliation catches shell tools, generators, and commits
-    ↓
-Capture is sealed
+Capture is sealed on exit, session transition, or manual rollover
     ↓
 L1 and L2 are generated from the bounded conversation interval
     ↓
 immutable Episode is published
 ```
 
-Persisted Capture paths make unfinished work recoverable after a crash. A resumed run gets a
-new Capture immediately, while older pending Captures are finalized in the
-background.
+Persisted Capture paths make unfinished work recoverable after a crash. Reopening
+the same Conversation reattaches its open Capture. Sealed Captures whose summary
+or publication failed remain pending for retry.
 
 ## MVP
 
@@ -111,8 +110,8 @@ It will provide:
 - automatic L1 context after successful file reads;
 - explicit L2 retrieval through a Pi tool;
 - immediate recording of successful `edit` and `write` operations;
-- non-mutating Git reconciliation at finalization;
-- clean shutdown, hot-reload, and crash-recovery semantics;
+- deliberate Capture rollover within a long-running Pi session;
+- clean shutdown, hot-reload, and crash-reattachment semantics;
 - fail-open behavior so Madeleine never breaks normal agent tools;
 - macOS and Linux support.
 
@@ -140,7 +139,9 @@ The MVP does **not** include:
 - copied transcript storage or bulk import of old agent histories;
 - multiplayer coordination or shared remote storage;
 - a daemon, web service, or user interface;
-- Agent Trace or Git AI interoperability.
+- Agent Trace or Git AI interoperability;
+- exhaustive filesystem or Git change attribution for shell commands,
+  generators, formatters, or human edits.
 
 These are not rejected forever. We want to focus first on validating file-level history.
 
@@ -151,7 +152,7 @@ Pi extension
     ↓ versioned JSON over stdin/stdout
 Madeleine CLI
     ├── private Go application and SQLite Store
-    └── system Git: repository identity and final reconciliation
+    └── system Git: repository identity
 ```
 
 SQLite is the sole source of truth for the MVP. Its write pattern is small,
@@ -165,11 +166,13 @@ Likely next steps are:
 
 1. Add more harness adapters without changing the core model.
 2. Import historical sessions from existing harness transcripts.
-3. Derive folder history and follow Git renames when exact paths prove limiting.
-4. Add range or symbol context only for repositories where large hotspot files
+3. Evaluate opt-in Git or filesystem attribution if structured mutation events
+   miss context that agents demonstrably need.
+4. Derive folder history and follow Git renames when exact paths prove limiting.
+5. Add range or symbol context only for repositories where large hotspot files
    create measurable noise.
-5. Expose active Capture activity to orchestrators for multi-agent awareness.
-6. Add Agent Trace import/export as an interoperability layer, not an internal
+6. Expose active Capture activity to orchestrators for multi-agent awareness.
+7. Add Agent Trace import/export as an interoperability layer, not an internal
    storage model.
 
 ## Project documents

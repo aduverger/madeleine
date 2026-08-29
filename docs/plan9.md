@@ -2,13 +2,14 @@
 
 PR scope: one PR  
 Depends on: `plan8.md`  
-Design decisions: D-004, D-005, D-006, D-007, D-011, D-014, D-016, D-021, D-023
+Design decisions: D-004, D-005, D-006, D-007, D-011, D-014, D-016, D-021, D-023, D-024
 
 ## Goal
 
 Connect Pi lifecycle and successful mutation events to Captures. Preserve one
-Capture across `/reload`, create new Captures for distinct runs, and expose
-operational status/abandon commands. Episode summarization starts in Plan 10.
+Capture across `/reload` and abrupt process restart, start a new Capture after a
+clean boundary, and expose operational status, rollover, and abandon commands.
+Episode summarization starts in Plan 10.
 
 ## Entire reuse gate
 
@@ -41,7 +42,9 @@ injected_paths: string[]
 ```
 
 - [x] Custom entries do not enter model context and are not given a renderer.
-- [x] Restore only the newest valid entry for the current Conversation.
+- [x] Restore only the newest valid entry for the current Conversation on
+  startup, reload, or resume; never inherit Capture state into a new or forked
+  Conversation.
 - [x] Append a new snapshot after Capture creation and after each newly
   injected path; sort/deduplicate paths before saving.
 - [x] Replace Plan 8's runtime-only injection set with this state so reload
@@ -61,22 +64,22 @@ injected_paths: string[]
 
 | Event | Required behavior |
 |---|---|
-| `session_start: startup` | Start a new Capture when no older open Capture blocks it. |
+| `session_start: startup` | Reattach the Conversation's open Capture after a crash; otherwise start one. |
 | `session_start: new` | Start a new Capture for the new Conversation. |
-| `session_start: resume` | Start a new Capture; never reattach a previous run. |
+| `session_start: resume` | Reattach an open Capture for that Conversation; otherwise start one. |
 | `session_start: fork` | Start a new Capture for the forked Conversation. |
 | `session_start: reload` | Reattach the existing open Capture. |
 | `session_shutdown: reload` | Preserve the open Capture; do not seal. |
 | other `session_shutdown` | Seal the current Capture. |
 
 - [x] Store `ctx.sessionManager.getLeafId()` as the start/end cursor.
-- [x] On reload, validate the persisted Capture with `capture.get` and require
-  `status=open`.
-- [x] If reload state is missing, query pending Captures for the Conversation
-  and reattach its single open Capture; start a new one only when none exists.
-- [x] Until Plan 11, an older open Capture encountered on non-reload startup
-  causes a one-time warning and disables new write capture for that run rather
-  than reattaching or corrupting boundaries.
+- [x] On startup, reload, or resume, validate the persisted Capture with
+  `capture.get` and require `status=open` for the same Conversation.
+- [x] If persisted state is missing or stale, query pending Captures for the
+  Conversation and reattach its single open Capture; start a new one only when
+  none exists.
+- [x] Warn and disable write capture only if invalid storage contains multiple
+  open Captures for one Conversation.
 
 ## Mutation recording
 
@@ -88,13 +91,15 @@ injected_paths: string[]
   a repeated path no more often than every 30 seconds.
 - [x] Await the short RPC call but preserve the original Pi result on all
   failures.
-- [x] Do not parse Bash commands; Plan 5's seal reconciliation covers surviving
-  shell changes.
+- [x] Do not parse Bash commands or infer paths from Git. Opaque shell,
+  formatter, generator, human, and other-session changes are outside MVP
+  attribution unless a structured mutation event also records the path.
 
 ## Shutdown sealing
 
 - [x] Cancel extension-owned in-flight RPC work before non-reload shutdown.
-- [x] Call `capture.seal` with the current leaf ID.
+- [x] Call `capture.seal` with the current leaf ID through one lifecycle helper
+  shared by shutdown and manual rollover.
 - [x] Treat an empty result as successfully abandoned.
 - [x] Leave non-empty Captures `pending_summary`; Plan 10 publishes them.
 - [x] Notify once on failure and leave an open Capture for later recovery.
@@ -105,12 +110,17 @@ Register one Pi command, `/madeleine`, and parse these strict subcommands:
 
 ```text
 /madeleine status
+/madeleine rollover
 /madeleine abandon <capture-id>
 /madeleine doctor
 ```
 
 - [x] `status` lists open/pending Captures for the current Repository and marks
   the current one.
+- [x] `rollover` waits for Pi to become idle, seals the current Capture, then
+  starts and persists a new Capture in the same Conversation. Until Plan 10,
+  non-empty sealed Captures remain `pending_summary` rather than becoming an
+  Episode immediately.
 - [x] `abandon` only accepts an ID returned for the current Repository and asks
   for UI confirmation before RPC; finalized Captures cannot be abandoned.
 - [x] `doctor` shows the existing structured checks in Pi UI.
@@ -120,10 +130,12 @@ Register one Pi command, `/madeleine`, and parse these strict subcommands:
 
 - [x] Exercise every lifecycle matrix row with a fake session manager.
 - [x] Verify reload reattachment and persisted injection deduplication.
-- [x] Verify startup/resume never reattaches an old run.
+- [x] Verify startup/resume reattach a matching open Capture after process
+  restart, while new/fork do not inherit state.
 - [x] Successful edit/write, repeated throttled write, failed tool result,
   read, Bash, and malformed path cases.
-- [x] Seal success, empty abandonment, Git/RPC failure, and reload no-op.
+- [x] Seal success, empty abandonment, RPC failure, reload no-op, and manual
+  rollover success/failure.
 - [x] Persist/restore state across a simulated extension module reload.
 - [x] Ephemeral Conversation behavior.
 - [x] Status output, abandon confirmation/cancel, wrong-Repository ID, and
@@ -145,14 +157,22 @@ Recorded least-confident decisions first:
    `capture.start` requires a non-empty, later-resolvable cursor. In that case
    the adapter appends one non-context `madeleine-boundary-v1` custom entry and
    uses its real Pi entry ID. No synthetic cursor is stored.
-2. Historical reads remain available when an older open Capture disables writes.
-   Because there is then no current Capture ID for a valid state snapshot,
-   injection deduplication is runtime-only for that blocked run. Normal and
-   reload-attached runs persist every successful injection as specified.
+2. A valid open Capture for the same persisted Conversation is reattached after
+   process restart. This is safe for MVP attribution because only this harness's
+   structured mutation events add paths; filesystem changes during downtime are
+   not inferred.
 3. For an ephemeral session, reload restores the newest valid state on the
    current Pi branch because no independent session-file identity exists.
    Process death loses that identity by design and creates a new UUIDv7.
-4. `/madeleine abandon` re-queries pending Captures in the current Repository
+4. `/madeleine rollover` is intentionally adapter orchestration over the
+   existing `capture.seal` and `capture.start` API operations, not a new atomic
+   core operation. If sealing succeeds and replacement start fails, the old
+   Capture remains sealed and the command reports failure without pretending the
+   two operations were atomic.
+5. The command is named `rollover` rather than `seal` because it both seals and
+   starts a replacement. Plan 10 upgrades its shared finalization path to publish
+   an Episode when summarization succeeds.
+6. `/madeleine abandon` re-queries pending Captures in the current Repository
    immediately before confirmation; “an ID returned for the current
    Repository” means an ID returned by that authoritative query, not a cached
    prior `/madeleine status` invocation.
@@ -183,5 +203,5 @@ Entire reuse review:
 
 ## Excluded from this PR
 
-Model summarization, Episode publication, automatic stale-Capture recovery, and
+Model summarization, Episode publication, automatic pending-summary retry, and
 multi-agent Capture activity display.

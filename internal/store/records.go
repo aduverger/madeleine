@@ -49,21 +49,6 @@ type EpisodeSummaryRecord struct {
 	L1        string
 }
 
-type GitPathRecord struct {
-	Path                string
-	PorcelainStatus     string
-	WorktreeFingerprint string
-	IndexIdentity       string
-}
-
-type GitBaselineRecord struct {
-	WorktreeRoot string
-	Status       string
-	Head         string
-	HeadExists   bool
-	Paths        []GitPathRecord
-}
-
 func timestamp(value time.Time) string {
 	return value.UTC().Format(time.RFC3339Nano)
 }

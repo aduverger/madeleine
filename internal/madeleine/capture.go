@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/aduverger/madeleine/internal/gitstate"
 	"github.com/aduverger/madeleine/internal/repopath"
 	"github.com/aduverger/madeleine/internal/store"
 )
@@ -53,10 +52,6 @@ func (s *Service) StartCapture(ctx context.Context, request StartCaptureRequest)
 	if err != nil {
 		return Capture{}, err
 	}
-	gitBaseline, err := gitstate.Capture(ctx, repository.WorktreeRoot, nil)
-	if err != nil {
-		return Capture{}, wrapError("start capture", request.RepositoryRoot, err)
-	}
 	conversationID, err := s.getOrCreateConversation(
 		ctx, repository.ID, request.ConversationKey, request.TranscriptRef,
 	)
@@ -92,10 +87,7 @@ func (s *Service) StartCapture(ctx context.Context, request StartCaptureRequest)
 		if found {
 			return fmt.Errorf("%w: Conversation already has open Capture %s", ErrConflict, existingCaptureID)
 		}
-		if err := transaction.InsertCapture(ctx, record, gitBaseline.Head, gitBaseline.HeadExists); err != nil {
-			return err
-		}
-		return transaction.InsertGitBaselinePaths(ctx, string(captureID), gitPathRecords(gitBaseline.Paths))
+		return transaction.InsertCapture(ctx, record)
 	})
 	if err != nil {
 		return Capture{}, wrapError("start capture", request.RepositoryRoot, err)
@@ -173,7 +165,7 @@ func (s *Service) RecordWrite(ctx context.Context, request RecordWriteRequest) e
 			return err
 		}
 		now := nowUTC()
-		if err := transaction.UpsertCapturePath(ctx, capture.ID, path, "tool", now, true); err != nil {
+		if err := transaction.UpsertCapturePath(ctx, capture.ID, path, now); err != nil {
 			return err
 		}
 		return transaction.UpdateCaptureLastSeen(ctx, capture.ID, now)
@@ -218,13 +210,8 @@ func (s *Service) SealCapture(ctx context.Context, request SealCaptureRequest) (
 		return FinalizationDraft{}, wrapError("seal capture", string(request.CaptureID), ErrInvalidState)
 	}
 
-	gitPaths, err := s.reconcileCaptureGitPaths(ctx, request.CaptureID)
-	if err != nil {
-		return FinalizationDraft{}, wrapError("seal capture", string(request.CaptureID), err)
-	}
-
 	var draft FinalizationDraft
-	err = s.database.WithTransaction(ctx, func(transaction *store.Tx) error {
+	err := s.database.WithTransaction(ctx, func(transaction *store.Tx) error {
 		capture, found, err := transaction.GetCapture(ctx, string(request.CaptureID))
 		if err != nil {
 			return err
@@ -233,14 +220,6 @@ func (s *Service) SealCapture(ctx context.Context, request SealCaptureRequest) (
 			return ErrNotFound
 		}
 		status := CaptureStatus(capture.Status)
-		if status == CaptureStatusOpen {
-			now := nowUTC()
-			for _, path := range gitPaths {
-				if err := transaction.UpsertCapturePath(ctx, capture.ID, path, "git", now, false); err != nil {
-					return err
-				}
-			}
-		}
 		paths, err := transaction.CapturePaths(ctx, capture.ID)
 		if err != nil {
 			return err
@@ -318,17 +297,4 @@ func (s *Service) AbandonCapture(ctx context.Context, captureID CaptureID) error
 		return nil
 	})
 	return wrapError("abandon capture", string(captureID), err)
-}
-
-func gitPathRecords(paths map[string]gitstate.PathSnapshot) []store.GitPathRecord {
-	records := make([]store.GitPathRecord, 0, len(paths))
-	for path, snapshot := range paths {
-		records = append(records, store.GitPathRecord{
-			Path:                path,
-			PorcelainStatus:     snapshot.PorcelainStatus,
-			WorktreeFingerprint: snapshot.WorktreeFingerprint,
-			IndexIdentity:       snapshot.IndexIdentity,
-		})
-	}
-	return records
 }

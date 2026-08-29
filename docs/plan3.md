@@ -11,8 +11,8 @@ Design decisions: D-004, D-005, D-007, D-008, D-016, D-021
 ## Goal
 
 Persist unfinished work directly in SQLite and implement the complete Capture
-state machine. Until Plan 5, sealing uses only structured paths recorded through
-`RecordWrite`; that temporary limitation must be explicit in tests.
+state machine. Sealing uses only intentional structured paths recorded through
+`RecordWrite`.
 
 ## Entire reuse gate
 
@@ -56,7 +56,6 @@ captures
 capture_paths
   capture_id TEXT NOT NULL REFERENCES captures(id)
   path TEXT NOT NULL
-  source TEXT NOT NULL CHECK(source IN ('tool', 'git'))
   first_seen_at TEXT NOT NULL
   last_seen_at TEXT NOT NULL
   PRIMARY KEY(capture_id, path)
@@ -81,8 +80,8 @@ capture_paths
 
 - [x] Resolve the Capture and require `status=open`.
 - [x] Normalize the supplied path against the Capture's stored worktree root.
-- [x] Upsert `(capture_id, path)` with source `tool`, preserving
-  `first_seen_at` and updating `last_seen_at`.
+- [x] Upsert `(capture_id, path)`, preserving `first_seen_at` and updating
+  `last_seen_at`.
 - [x] Update Capture `last_seen_at` in the same transaction.
 - [x] Reject writes to sealed, finalized, or abandoned Captures with
   `ErrInvalidState`.
@@ -170,9 +169,10 @@ Listed least-confident first:
    canonical tested transition table, durable repository-relative paths,
    terminal idempotency, and abandonment when no files were captured. Existing
    `NOTICE` attribution remains intact.
-10. Before Plan 5, filesystem or shell-only changes are intentionally invisible.
-   A dedicated test creates an unrecorded file and confirms sealing abandons the
-   Capture; only successful `RecordWrite` paths can keep it pending in this PR.
+10. The MVP originally planned to add Git reconciliation in Plan 5, but D-024
+   restored structured-only attribution after Plan 9. Filesystem or shell-only
+   changes are intentionally invisible because path association is a retrieval
+   signal, not an exhaustive audit log.
 11. Terminology was clarified after implementation: Capture and Episode are the
    domain entities; `live` and `history` are descriptions, not parallel models.
    This changes documentation only and leaves the schema, API, and state machine
@@ -189,4 +189,5 @@ Listed least-confident first:
 
 ## Excluded from this PR
 
-Episodes, summary generation, Git reconciliation, RPC, and Pi hooks.
+Episodes, summary generation, optional future unstructured-change attribution,
+RPC, and Pi hooks.

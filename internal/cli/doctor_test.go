@@ -29,7 +29,7 @@ func TestDoctorInsideAndOutsideGit(t *testing.T) {
 			"binary_version: ok - 0.1.0 (abc123)",
 			"data_directory: ok - accessible",
 			"application: ok - initialized",
-			"schema_version: ok - version 4",
+			"schema_version: ok - version 3",
 			"git_executable: ok - git version",
 			"repository: ok - resolved",
 		} {

@@ -2,6 +2,7 @@ import {
   isEditToolResult,
   isWriteToolResult,
   type ExtensionAPI,
+  type ExtensionCommandContext,
   type ExtensionContext,
   type SessionShutdownEvent,
   type SessionStartEvent,
@@ -17,6 +18,11 @@ import { PiState, type ConversationIdentity } from "./state.ts";
 
 const writeRefreshIntervalMs = 30_000;
 const unicodeSpaces = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
+
+export interface RolloverResult {
+  sealed: FinalizationDraft;
+  startedCaptureID: string;
+}
 
 export interface CaptureClient {
   startCapture(
@@ -68,29 +74,40 @@ export class CaptureLifecycle {
     this.state.clearCapture();
   }
 
+  async rollover(ctx: ExtensionCommandContext): Promise<RolloverResult> {
+    if (!this.captureID) throw new Error("Madeleine has no active Capture");
+
+    this.workController.abort();
+    try {
+      const sealed = await this.sealCurrentCapture(ctx);
+      if (!sealed) throw new Error("Madeleine has no active Capture");
+
+      this.resetCaptureWork();
+      await this.createCapture(ctx);
+      if (!this.captureID) throw new Error("Madeleine could not start a replacement Capture");
+      return { sealed, startedCaptureID: this.captureID };
+    } catch (error) {
+      if (this.captureID) this.workController = new AbortController();
+      throw error;
+    }
+  }
+
   private async start(event: SessionStartEvent, ctx: ExtensionContext): Promise<void> {
     if (!(await this.ensureReady(ctx))) return;
 
     this.repositoryRoot = ctx.cwd;
     this.conversation = this.state.initialize(ctx, event.reason);
     this.captureID = undefined;
-    this.lastPersistedWriteAtByPath.clear();
-    this.writePathsInFlight.clear();
-    this.workController.abort();
-    this.workController = new AbortController();
+    this.resetCaptureWork();
 
     try {
-      if (event.reason === "reload") {
-        await this.resumeReload(ctx);
-      } else {
-        await this.startNewRun(ctx);
-      }
+      await this.resumeOrCreate(ctx);
     } catch {
       this.notifyOnce(ctx, "start", "Madeleine could not start write capture for this run.");
     }
   }
 
-  private async resumeReload(ctx: ExtensionContext): Promise<void> {
+  private async resumeOrCreate(ctx: ExtensionContext): Promise<void> {
     const persistedCaptureID = this.state.currentCaptureID();
     if (persistedCaptureID) {
       try {
@@ -112,20 +129,7 @@ export class CaptureLifecycle {
       return;
     }
     if (openCaptures.length > 1) {
-      this.notifyOnce(ctx, "reload-conflict", "Madeleine found multiple open Captures; write capture is disabled.");
-      return;
-    }
-    await this.createCapture(ctx);
-  }
-
-  private async startNewRun(ctx: ExtensionContext): Promise<void> {
-    const openCaptures = await this.openCapturesForConversation();
-    if (openCaptures.length > 0) {
-      this.notifyOnce(
-        ctx,
-        "older-open",
-        "Madeleine found an unfinished Capture. Write capture is disabled for this run; use /madeleine status.",
-      );
+      this.notifyOnce(ctx, "open-conflict", "Madeleine found multiple open Captures; write capture is disabled.");
       return;
     }
     await this.createCapture(ctx);
@@ -205,13 +209,26 @@ export class CaptureLifecycle {
     this.workController.abort();
     if (event.reason === "reload" || !this.captureID) return;
 
-    const captureID = this.captureID;
     try {
-      await this.client.sealCapture(captureID, this.state.ensureCursor(ctx));
-      this.clearCurrentCapture(captureID);
+      await this.sealCurrentCapture(ctx);
     } catch {
       this.notifyOnce(ctx, "seal", "Madeleine could not seal the current Capture; it remains recoverable.");
     }
+  }
+
+  private async sealCurrentCapture(ctx: ExtensionContext): Promise<FinalizationDraft | undefined> {
+    if (!this.captureID) return undefined;
+    const captureID = this.captureID;
+    const draft = await this.client.sealCapture(captureID, this.state.ensureCursor(ctx));
+    this.clearCurrentCapture(captureID);
+    return draft;
+  }
+
+  private resetCaptureWork(): void {
+    this.workController.abort();
+    this.workController = new AbortController();
+    this.lastPersistedWriteAtByPath.clear();
+    this.writePathsInFlight.clear();
   }
 
   private notifyOnce(ctx: ExtensionContext, key: string, message: string): void {

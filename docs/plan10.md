@@ -2,7 +2,7 @@
 
 PR scope: one PR  
 Depends on: `plan9.md`  
-Design decisions: D-003, D-006, D-013, D-016, D-017, D-021, D-023
+Design decisions: D-003, D-006, D-013, D-016, D-017, D-021, D-023, D-024
 
 ## Goal
 
@@ -44,8 +44,8 @@ harnesses/pi/*.test.ts
 
 - [ ] Include user text, assistant text, compaction summaries, and mutation
   tool calls/results between the boundaries.
-- [ ] Include final reconciled paths from `FinalizationDraft` as authoritative
-  metadata.
+- [ ] Include the structured mutation paths from `FinalizationDraft` as
+  authoritative metadata.
 - [ ] Omit read tool outputs, image/audio payloads, internal custom state, and
   unrelated tool-result bulk.
 - [ ] Strip complete `<madeleine-context ...>...</madeleine-context>` blocks
@@ -90,6 +90,8 @@ The model must return exactly one JSON object and no Markdown fence:
 
 ## Clean finalization
 
+- [ ] Implement one finalization function shared by non-reload shutdown,
+  `/madeleine rollover`, and explicit retry.
 - [ ] For every non-reload shutdown, stop background work, seal the current
   Capture, and return immediately for an empty/abandoned draft.
 - [ ] Project, summarize, then call `episode.publish` with the Capture ID and
@@ -97,8 +99,21 @@ The model must return exactly one JSON object and no Markdown fence:
 - [ ] Treat an identical publish retry as success.
 - [ ] On model, parse, timeout, or publish failure, notify once and leave
   `pending_summary` unchanged.
-- [ ] Clear current in-memory Capture state only after empty abandonment or
-  confirmed Episode publication.
+- [ ] Clear current in-memory Capture state after sealing has durably frozen its
+  paths and boundaries; publication failure leaves the old Capture
+  `pending_summary` without blocking a replacement Capture.
+
+## Manual rollover
+
+- [ ] Upgrade the existing `/madeleine rollover` command to use the shared
+  finalization function.
+- [ ] Wait for Pi to become idle, seal and attempt to publish the current
+  Capture, then start a replacement in the same Conversation.
+- [ ] If sealing fails, keep the current Capture active and do not start a
+  replacement.
+- [ ] If summary or publication fails after sealing, start the replacement and
+  report that the previous Capture remains pending.
+- [ ] On success, report the published Episode ID and replacement Capture ID.
 
 ## Explicit retry command
 
@@ -123,13 +138,16 @@ The model must return exactly one JSON object and no Markdown fence:
 - [ ] No model/auth, model rejection, timeout, cancellation, and publish error
   all preserve `pending_summary`.
 - [ ] Clean quit/new/resume/fork publishes exactly one Episode; reload does not.
+- [ ] Manual rollover publishes or leaves pending the old Capture and always
+  starts exactly one replacement after successful sealing.
 - [ ] Empty sealed Capture makes no model call.
 - [ ] Retry one and retry queue behavior.
 
 ## Acceptance criteria
 
-- [ ] A normal Pi run with modified files creates one queryable Episode before
-  shutdown completes or leaves an explicitly pending Capture.
+- [ ] A normal Pi work interval with modified files creates one queryable
+  Episode before shutdown or rollover completes, or leaves an explicitly
+  pending Capture.
 - [ ] The Episode summary covers only the Capture interval, not the whole Pi
   Conversation.
 - [ ] Injected Madeleine context cannot recursively become memory.
@@ -137,5 +155,5 @@ The model must return exactly one JSON object and no Markdown fence:
 
 ## Excluded from this PR
 
-Automatic crash recovery on startup, concurrent recovery/current-run
-coordination, additional summarizer providers, and past transcript import.
+Automatic background retry of older pending summaries, end-to-end crash
+hardening, additional summarizer providers, and past transcript import.

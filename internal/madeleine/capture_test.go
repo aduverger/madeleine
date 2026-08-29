@@ -162,15 +162,15 @@ func TestRecordWriteNormalizesAndRefreshesPath(t *testing.T) {
 	if err := store.RecordWrite(context.Background(), request); err != nil {
 		t.Fatal(err)
 	}
-	var path, source, firstSeen, firstLastSeen string
+	var path, firstSeen, firstLastSeen string
 	if err := store.db.QueryRow(`
-		SELECT path, source, first_seen_at, last_seen_at
+		SELECT path, first_seen_at, last_seen_at
 		FROM capture_paths WHERE capture_id = ?`, capture.ID,
-	).Scan(&path, &source, &firstSeen, &firstLastSeen); err != nil {
+	).Scan(&path, &firstSeen, &firstLastSeen); err != nil {
 		t.Fatal(err)
 	}
-	if path != "src/main.go" || source != "tool" {
-		t.Fatalf("stored path/source = %q/%q, want src/main.go/tool", path, source)
+	if path != "src/main.go" {
+		t.Fatalf("stored path = %q, want src/main.go", path)
 	}
 
 	time.Sleep(2 * time.Millisecond)
@@ -394,14 +394,14 @@ func TestSealCaptureOrdersPathsAndIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestSealCaptureReconcilesUnrecordedGitChanges(t *testing.T) {
+func TestSealCaptureIgnoresUnrecordedFilesystemChanges(t *testing.T) {
 	t.Parallel()
 
 	store := openTestStore(t, t.TempDir())
 	defer store.Close()
 	root := newTestGitRepository(t, "")
-	capture := startTestCapture(t, store, root, "pre-git-reconciliation")
-	if err := os.WriteFile(filepath.Join(root, "shell-created.go"), []byte("package example\n"), 0o600); err != nil {
+	capture := startTestCapture(t, store, root, "structured-paths-only")
+	if err := os.WriteFile(filepath.Join(root, "generated.go"), []byte("package example\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -411,9 +411,8 @@ func TestSealCaptureReconcilesUnrecordedGitChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if draft.Empty || draft.Status != CaptureStatusPendingSummary ||
-		!reflect.DeepEqual(draft.Paths, []string{"shell-created.go"}) {
-		t.Fatalf("draft = %#v, want pending Capture with shell-created.go", draft)
+	if !draft.Empty || draft.Status != CaptureStatusAbandoned || len(draft.Paths) != 0 {
+		t.Fatalf("draft = %#v, want empty abandoned Capture", draft)
 	}
 }
 

@@ -54,7 +54,7 @@ func TestOpenMigratesAndReopensStore(t *testing.T) {
 
 	for _, table := range []string{
 		"repositories", "repository_aliases", "conversations", "captures", "capture_paths",
-		"capture_git_baseline_paths", "episodes", "episode_files",
+		"episodes", "episode_files",
 	} {
 		if !databaseObjectExists(t, reopened.db, "table", table) {
 			t.Errorf("table %q does not exist", table)
@@ -76,8 +76,8 @@ func TestOpenMigratesAndReopensStore(t *testing.T) {
 	if err := fresh.db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&freshMigrationCount); err != nil {
 		t.Fatal(err)
 	}
-	if freshMigrationCount != 4 {
-		t.Fatalf("fresh migration count = %d, want 4", freshMigrationCount)
+	if freshMigrationCount != 3 {
+		t.Fatalf("fresh migration count = %d, want 3", freshMigrationCount)
 	}
 }
 
@@ -100,20 +100,26 @@ func TestSchemaIndexes(t *testing.T) {
 	}
 }
 
-func TestGitBaselineSchema(t *testing.T) {
+func TestCaptureSchemaContainsNoGitAttribution(t *testing.T) {
 	t.Parallel()
 
 	store := openTestStore(t, t.TempDir())
 	defer store.Close()
-	for _, column := range []string{"git_start_head", "git_start_head_exists"} {
+	if databaseObjectExists(t, store.db, "table", "capture_git_baseline_paths") {
+		t.Fatal("Git baseline table exists")
+	}
+	for table, column := range map[string]string{
+		"captures":      "git_start_head",
+		"capture_paths": "source",
+	} {
 		var count int
-		if err := store.db.QueryRow(`
-			SELECT COUNT(*) FROM pragma_table_info('captures') WHERE name = ?`, column,
+		if err := store.db.QueryRow(
+			"SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?", table, column,
 		).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
-		if count != 1 {
-			t.Errorf("captures column %q does not exist", column)
+		if count != 0 {
+			t.Errorf("%s column %q exists", table, column)
 		}
 	}
 }

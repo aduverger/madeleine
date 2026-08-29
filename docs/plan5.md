@@ -2,13 +2,52 @@
 
 PR scope: one PR  
 Depends on: `plan4.md`  
-Design decisions: D-002, D-007, D-009, D-016, D-021
+Design decisions: D-002, D-007, D-009 (superseded), D-016, D-021, D-024
 
 > Historical note: paths and public-package references describe the merged PR.
 > Plan 6 later internalizes the Go implementation when Madeleine becomes a
-> standalone application.
+> standalone application. The Git reconciliation behavior below was removed by
+> the post-Plan-9 MVP revision documented next.
 
-## Goal
+## MVP revision: structured attribution only
+
+After the Pi lifecycle was implemented, Git reconciliation proved broader than
+Madeleine's retrieval semantics. It could attach context to formatter output,
+generated files, snapshot updates, human edits, or changes from another session
+without evidence that the agent reasoned about those files. Long-open Captures
+also made start/end Git comparison a poor attribution boundary.
+
+The unreleased MVP therefore returns to structured mutation evidence:
+
+- [x] Keep successful harness `edit` and `write` events as the only Capture path
+  source.
+- [x] Remove Git snapshots, reconciliation, baseline persistence, and their
+  runtime tests.
+- [x] Rewrite the unreleased migration chain to remove migration 4 and the path
+  provenance column; no compatibility migration is retained.
+- [x] Keep Git only for Repository discovery and identity.
+- [x] Defer broader Git/filesystem tracking until usage demonstrates that opaque
+  shell edits are more harmful than false-positive historical context.
+
+### Revision decision ledger
+
+Listed least-confident first:
+
+1. A source file changed exclusively through Bash is intentionally missed. The
+   adapter cannot infer intent reliably from an arbitrary command, and false
+   path associations directly degrade Madeleine's core retrieval behavior.
+2. Migration compatibility is intentionally absent because Madeleine has not
+   shipped or been used. Development databases created at schema version 4 must
+   be discarded rather than supported with dead MVP schema.
+3. The `internal/gitstate` package is deleted rather than retained unused. If
+   broader tracking returns, it should again be a focused Go package that knows
+   snapshots and paths but not Captures, Episodes, Pi, or SQLite policy.
+4. Entire attribution remains in `NOTICE` because repository-discovery Git
+   process mechanics adapted from Entire remain in use.
+
+The remainder of this file records the superseded implementation.
+
+## Historical goal
 
 Make Capture final paths authoritative enough for real agent work by combining
 structured Pi write evidence with non-mutating Git reconciliation. Preserve
@@ -177,7 +216,7 @@ Listed least-confident first:
     index bytes, index file identity, and index modification time immediately
     before and after Git observation.
 
-## Acceptance criteria
+## Historical acceptance criteria (superseded)
 
 - [x] Final paths are the deterministic union of structured writes and Git
   changes since the Capture baseline.

@@ -69,7 +69,7 @@ describe("PiState", () => {
     ]);
     const state = new PiState(pi);
 
-    state.initialize(ctx, "reload");
+    state.initialize(ctx, "startup");
     expect(state.currentCaptureID()).toBe("capture-new");
     expect(state.claimPath("a.ts")).toBe(false);
     expect(state.claimPath("new.ts")).toBe(true);
@@ -79,6 +79,24 @@ describe("PiState", () => {
       ...newest,
       injected_paths: ["a.ts", "b.ts", "new.ts"],
     });
+  });
+
+  it("does not inherit Capture state into a new or forked Conversation", () => {
+    const sessionFile = resolve("session.jsonl");
+    const persisted: PersistedState = {
+      version: 1,
+      conversation_id: sessionFile,
+      capture_id: "capture-old",
+      injected_paths: ["a.ts"],
+    };
+
+    for (const reason of ["new", "fork"] as const) {
+      const { pi, ctx } = harness(sessionFile, [entry("one", persisted)]);
+      const state = new PiState(pi);
+      state.initialize(ctx, reason);
+      expect(state.currentCaptureID()).toBeUndefined();
+      expect(state.claimPath("a.ts")).toBe(true);
+    }
   });
 
   it("keeps an ephemeral Conversation across reload but not process death", () => {

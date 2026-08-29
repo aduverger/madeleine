@@ -150,37 +150,15 @@ describe("RPCClient", () => {
     });
   });
 
-  it("gives Git-backed lifecycle calls a longer timeout than lookups", async () => {
-    const capture = captureResult();
-    const lifecycleDelayMs = 50;
+  it("applies the standard timeout to lifecycle calls", async () => {
     const { client } = await fakeClient(
-      {
-        methods: {
-          "capture.start": { result: capture, delayMs: lifecycleDelayMs },
-          "capture.seal": {
-            result: {
-              capture_id: "capture-1",
-              status: "pending_summary",
-              empty: false,
-              paths: ["src/a.ts"],
-            },
-            delayMs: lifecycleDelayMs,
-          },
-          "context.for_paths": { result: [], delayMs: lifecycleDelayMs },
-        },
-      },
-      { timeoutMs: 20, lifecycleTimeoutMs: 500 },
+      { methods: { "capture.start": { result: captureResult(), delayMs: 200 } } },
+      { timeoutMs: 20 },
     );
 
     await expect(
       client.startCapture("/repo", "session-1", "/sessions/one.jsonl", "entry-1"),
-    ).resolves.toEqual(capture);
-    await expect(client.sealCapture("capture-1", "entry-2")).resolves.toMatchObject({
-      status: "pending_summary",
-    });
-    await expect(client.contextForPath("/repo", "src/a.ts")).rejects.toMatchObject({
-      kind: "timeout",
-    });
+    ).rejects.toMatchObject({ kind: "timeout" });
   });
 
   it.each([

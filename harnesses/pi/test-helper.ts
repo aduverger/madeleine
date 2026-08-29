@@ -85,7 +85,7 @@ export function healthyDoctorResult(): { checks: DoctorCheck[] } {
       { name: "binary_version", ok: true, detail: "dev" },
       { name: "data_directory", ok: true, detail: "accessible" },
       { name: "application", ok: true, detail: "initialized" },
-      { name: "schema_version", ok: true, detail: "version 4" },
+      { name: "schema_version", ok: true, detail: "version 3" },
       { name: "git_executable", ok: true, detail: "git version" },
       { name: "repository", ok: true, detail: "resolved" },
     ],
