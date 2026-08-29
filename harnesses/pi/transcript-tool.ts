@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { renderTranscriptView } from "./render.ts";
+import { fitRawTranscriptPage, renderTranscriptView } from "./render.ts";
 import { AdapterError, type TranscriptView } from "./rpc.ts";
 
 interface TranscriptClient {
@@ -48,12 +48,13 @@ export function registerTranscriptTool(
           params.offset,
           signal,
         );
+        const visiblePage = fitRawTranscriptPage(transcript, params.offset ?? 0);
         return {
-          content: [{ type: "text" as const, text: renderTranscriptView(transcript) }],
+          content: [{ type: "text" as const, text: renderTranscriptView(visiblePage) }],
           details: {
-            transcript_id: transcript.transcript_id,
-            view: transcript.view,
-            next_offset: transcript.next_offset,
+            transcript_id: visiblePage.transcript_id,
+            view: visiblePage.view,
+            next_offset: visiblePage.next_offset,
           },
         };
       } catch (error) {

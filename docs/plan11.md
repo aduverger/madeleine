@@ -208,6 +208,9 @@ transcript; they are not new L3/L4 summary levels.
 - [x] Raw view excludes compaction entries but retains original messages across
   a compaction.
 - [x] Branch summaries are retained without traversing abandoned raw branches.
+- [x] Tree navigation before the active Capture boundary seals the source
+  interval and starts a destination Capture, with and without a branch summary;
+  preservation failure cancels navigation.
 - [x] Read calls/output, edit/write bodies, successful result prose, binary
   content, custom state, thinking, and recursive Madeleine context are excluded.
 - [x] Atomic seal success, empty abandonment, identical retry, conflicting
@@ -220,6 +223,8 @@ transcript; they are not new L3/L4 summary levels.
 - [x] Retry succeeds after deleting or moving the original Pi session file.
 - [x] Compact retrieval, multi-page raw retrieval, invalid offset/view, missing
   Transcript, and cross-Repository denial.
+- [x] A raw database page exceeding Pi's output bound keeps every complete entry
+  reachable in order and leaves its next offset visible.
 - [x] `madeleine_episode` exposes Transcript ID and
   `madeleine_transcript` renders both untrusted views within Pi output bounds.
 
@@ -247,56 +252,65 @@ summaries.
 Plan 11 is implemented. A non-empty seal now atomically stores a generated
 Transcript and its structured entries. Summary and retry paths page those SQLite
 entries, render the authoritative Capture paths, and publish the exact final
-model evidence with the Episode in one transaction. Pi exposes repository-safe
-compact and raw retrieval without retaining a session-file reference.
+model evidence with the Episode in one transaction. Pi preserves an active
+Capture before tree navigation crosses its start boundary and exposes
+repository-safe, output-aware compact and raw retrieval without retaining a
+session-file reference.
 
 ## Plan revisions and decision ledger
 
 Listed least-confident first:
 
-1. Raw retrieval uses a fixed 50-entry page. A negative offset, a compact-view
-   offset, or a positive offset beyond the available entries is invalid. The
-   page size bounds ordinary RPC responses without introducing a caller-tunable
-   protocol surface. The local child-process transport permits at most 16 MiB
-   so context-sized compact evidence can reach the adapter; Pi's standard
-   50KB/2000-line truncation remains the final tool-output bound.
-2. Mutation entries are emitted when an `edit` or `write` tool result matches a
+1. SQLite raw retrieval uses a fixed maximum 50-entry page. The Pi adapter then
+   exposes the largest complete prefix that fits its escaped 50KB/2000-line
+   output wrapper and advances to the first hidden entry; pagination metadata is
+   outside truncatable content. If one entry alone exceeds the bound, Pi shows a
+   truncated version and advances past that entry. Intra-entry continuation is
+   deferred as disproportionate MVP complexity. A negative offset, a
+   compact-view offset, or a positive offset beyond available entries remains
+   invalid. The child-process transport permits at most 16 MiB so context-sized
+   compact evidence can reach the adapter.
+2. Before Pi tree navigation moves outside the active Capture boundary, the
+   adapter seals at the source leaf and starts a new Capture after navigation.
+   It cancels navigation when preservation fails. Navigation whose target still
+   descends from the Capture start cursor does not split the Capture.
+3. Mutation entries are emitted when an `edit` or `write` tool result matches a
    bounded-branch tool call. This stores operation, path, and success/failure at
    the chronological result position; incomplete calls without a result are
    omitted because their outcome is unknown.
-3. Abandoning a sealed pending Capture deletes its unpublished Transcript after
+4. Abandoning a sealed pending Capture deletes its unpublished Transcript after
    clearing the Capture relationship. Published Transcripts remain immutable;
    the existing abandon command continues to mean deleting unfinished data.
-4. `madeleine_transcript.view` is optional with a TypeBox default of `compact`.
+5. `madeleine_transcript.view` is optional with a TypeBox default of `compact`.
    `raw` must be selected explicitly before an offset is accepted.
-5. Transcript tables and relationships were added by editing the original
+6. Transcript tables and relationships were added by editing the original
    migrations because the application has never shipped. No compatibility
    migration, dual-read, or legacy file-reference field remains.
-6. The persisted Transcript payload is harness-agnostic Madeleine-domain data.
+7. The persisted Transcript payload is harness-agnostic Madeleine-domain data.
    Pi owns only the translation from Pi session entries; future Claude Code,
    Codex, or other adapters submit and retrieve the same canonical entry kinds,
    so history can cross harness boundaries.
-7. "Raw" means the fullest persisted Madeleine semantic evidence view, not a
+8. "Raw" means the fullest persisted Madeleine semantic evidence view, not a
    byte copy of Pi's JSONL. It deliberately excludes reads, file-content tool
    payloads, successful result prose, and privileged/internal content that do
    not improve file-intent evidence. User, assistant, and branch-summary text
    remain complete even when the session exceeds a model context window.
-8. No arbitrary total storage limit is planned. Cursor bounds and semantic
+9. No arbitrary total storage limit is planned. Cursor bounds and semantic
    filtering define Transcript scope; model context limits define chunk size,
    while RPC framing and retrieval pagination bound individual operations.
-9. Compact text is stored in addition to structured entries. It may contain
+10. Compact text is stored in addition to structured entries. It may contain
    Capture-specific model-generated chunk summaries, so it is not
    deterministically derivable. Persisting it proves exactly what the final
    summary model saw and prevents a later attempt or renderer change from
    rewriting a published Episode's evidence.
-10. Structured Transcript insertion is part of `capture.seal`, rather than a
+11. Structured Transcript insertion is part of `capture.seal`, rather than a
    separate `transcript.put` followed by sealing. Compact evidence is stored
    atomically with Episode publication, avoiding a separate mutable
    `prepare_compact` state while keeping every failed attempt recoverable from
    raw SQLite entries.
-11. Pi compaction summaries are excluded from both views. The append-only raw
+12. Pi compaction summaries are excluded from both views. The append-only raw
    messages remain available, while the summary's semantic start boundary is
    not reliably limited to the Capture start cursor.
-12. The existing recovery/MVP plan was moved from Plan 11 to Plan 12 so final
+13. The existing recovery/MVP plan was moved from Plan 11 to Plan 12 so final
    end-to-end hardening validates persisted evidence rather than immediately
    obsolete transcript references.

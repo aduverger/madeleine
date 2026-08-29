@@ -133,6 +133,7 @@ describe("renderTranscriptView", () => {
 
     expect(Buffer.byteLength(rendered)).toBeLessThanOrEqual(DEFAULT_MAX_BYTES);
     expect(rendered).toContain("[Transcript output truncated");
+    expect(rendered).toContain("Next raw offset: 50");
     expect(rendered.endsWith("</madeleine-transcript>")).toBe(true);
   });
 });

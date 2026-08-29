@@ -209,6 +209,15 @@ session_start(reason=reload)    -> reattach the same open Capture
 The Capture ID and already-injected paths are persisted through Pi custom
 entries so a reload does not duplicate historical context.
 
+### Tree navigation
+
+Navigation within the active Capture's branch keeps that Capture open. Before
+`/tree` moves to a branch where the Capture start cursor is no longer an
+ancestor, the adapter seals the old interval at the source leaf. It cancels
+navigation if sealing cannot preserve that interval, otherwise it starts a new
+Capture from the selected destination after navigation. This applies whether or
+not Pi creates a branch summary.
+
 ### Crash and resume
 
 An abrupt exit leaves the current Capture `open`. Opening the same persisted Pi
@@ -288,8 +297,11 @@ append-only raw messages remain available across compaction, while a compaction
 summary may contain ancestors from before the Capture boundary.
 
 The Pi adapter exposes `madeleine_transcript` for repository-scoped compact or
-raw retrieval. These are evidence views, not generated L3/L4 summaries, and no
-retrieval depends on the original Pi session file.
+raw retrieval. SQLite returns stable position-based pages; the adapter exposes
+the largest complete entry prefix that fits Pi's escaped output bound and points
+to the first hidden entry. Pagination remains visible even when one oversized
+entry itself must be truncated. These are evidence views, not generated L3/L4
+summaries, and no retrieval depends on the original Pi session file.
 
 ### Injection safety
 

@@ -82,6 +82,45 @@ describe("madeleine_transcript", () => {
     expect(result.details.next_offset).toBe(100);
   });
 
+  it("keeps every entry reachable when one database page exceeds Pi's output bound", async () => {
+    const entries = ["first", "second", "third"].map((marker) => ({
+      kind: "user" as const,
+      text: `${marker}:${"x".repeat(30_000)}`,
+    }));
+    const getTranscript = vi.fn(async (
+      _repositoryRoot: string,
+      _transcriptID: string,
+      _view: "compact" | "raw",
+      offset = 0,
+    ): Promise<TranscriptView> => ({
+      transcript_id: "transcript-1",
+      view: "raw",
+      entries: entries.slice(offset),
+    }));
+    const tool = register({ getTranscript });
+
+    let offset = 0;
+    for (const [index, entry] of entries.entries()) {
+      const result = await tool.execute(
+        `call-${index}`,
+        { transcript_id: "transcript-1", view: "raw", offset },
+        undefined,
+        undefined,
+        context,
+      );
+      expect(result.content[0].text).toContain(entry.text);
+      expect(result.content[0].text).toContain(
+        index < entries.length - 1 ? `Next raw offset: ${index + 1}` : "</madeleine-transcript>",
+      );
+      expect(result.details.next_offset).toBe(
+        index < entries.length - 1 ? index + 1 : undefined,
+      );
+      offset = result.details.next_offset ?? offset;
+    }
+
+    expect(getTranscript.mock.calls.map((call) => call[3])).toEqual([0, 1, 2]);
+  });
+
   it.each(["not_found", "outside_repository"])(
     "returns a repository-safe error for %s",
     async (code) => {

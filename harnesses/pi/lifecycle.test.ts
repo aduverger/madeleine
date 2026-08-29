@@ -41,6 +41,12 @@ class FakePi {
   async emit(event: string, payload: unknown, ctx: ExtensionContext): Promise<void> {
     for (const handler of this.handlers.get(event) ?? []) await handler(payload, ctx);
   }
+
+  async emitResults(event: string, payload: unknown, ctx: ExtensionContext): Promise<unknown[]> {
+    const results: unknown[] = [];
+    for (const handler of this.handlers.get(event) ?? []) results.push(await handler(payload, ctx));
+    return results;
+  }
 }
 
 class FakeClient implements CaptureClient {
@@ -212,6 +218,47 @@ function setup(
   lifecycle.register(pi.api);
   const context = testContext(pi);
   return { pi, client, state, lifecycle, ...context };
+}
+
+function addCaptureAncestor(pi: FakePi): void {
+  pi.entries[0]!.parentId = "before-capture";
+  pi.entries.unshift({
+    type: "custom",
+    id: "before-capture",
+    parentId: null,
+    timestamp: "2026-01-01T00:00:00Z",
+    customType: "older-boundary",
+    data: {},
+  });
+}
+
+function appendWriteExchange(pi: FakePi, id: string, path: string): void {
+  const toolCallID = `${id}-call`;
+  pi.entries.push({
+    type: "message",
+    id: `${id}-assistant`,
+    parentId: pi.leaf,
+    timestamp: "2026-01-01T00:00:01Z",
+    message: {
+      role: "assistant",
+      content: [{ type: "toolCall", id: toolCallID, name: "write", arguments: { path } }],
+    },
+  });
+  pi.leaf = `${id}-assistant`;
+  pi.entries.push({
+    type: "message",
+    id: `${id}-result`,
+    parentId: pi.leaf,
+    timestamp: "2026-01-01T00:00:02Z",
+    message: {
+      role: "toolResult",
+      toolCallId: toolCallID,
+      toolName: "write",
+      content: [{ type: "text", text: "written" }],
+      isError: false,
+    },
+  });
+  pi.leaf = `${id}-result`;
 }
 
 function mutation(toolName: string, path: unknown, isError = false) {
@@ -388,6 +435,93 @@ describe("Capture lifecycle", () => {
     ]);
     expect(client.captures[1]?.conversation_key.external_id).toBe(externalID);
     expect(lifecycle.currentCaptureID()).toBe("capture-2");
+  });
+
+  it.each([false, true])(
+    "seals before tree navigation outside the Capture and starts again with summary=%s",
+    async (withSummary) => {
+      const finalize = vi.fn(async (sealed: FinalizationDraft) => ({
+        captureID: sealed.capture_id,
+        status: "published" as const,
+        episodeID: `episode-${sealed.capture_id}`,
+      }));
+      const { pi, client, lifecycle, ctx } = setup(() => 0, { finalize });
+      addCaptureAncestor(pi);
+      await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
+
+      appendWriteExchange(pi, "first", "src/first.ts");
+      await pi.emit("tool_result", mutation("write", "src/first.ts"), ctx);
+      const oldLeafId = pi.leaf;
+      const navigation = await pi.emitResults("session_before_tree", {
+        type: "session_before_tree",
+        preparation: {
+          targetId: "before-capture",
+          oldLeafId,
+          commonAncestorId: "before-capture",
+          entriesToSummarize: [],
+          userWantsSummary: withSummary,
+        },
+        signal: new AbortController().signal,
+      }, ctx);
+      expect(navigation).toEqual([undefined]);
+      expect(client.captures[0]?.end_cursor).toBe(oldLeafId);
+
+      pi.leaf = "before-capture";
+      let summaryEntry: any;
+      if (withSummary) {
+        summaryEntry = {
+          type: "branch_summary",
+          id: "tree-summary",
+          parentId: "before-capture",
+          timestamp: "2026-01-01T00:00:03Z",
+          fromId: oldLeafId,
+          summary: "The first branch changed src/first.ts.",
+        };
+        pi.entries.push(summaryEntry);
+        pi.leaf = summaryEntry.id;
+      }
+      await pi.emit("session_tree", {
+        type: "session_tree",
+        newLeafId: pi.leaf,
+        oldLeafId,
+        summaryEntry,
+      }, ctx);
+      expect(lifecycle.currentCaptureID()).toBe("capture-2");
+
+      appendWriteExchange(pi, "second", "src/second.ts");
+      await pi.emit("tool_result", mutation("write", "src/second.ts"), ctx);
+      await pi.emit("session_shutdown", { type: "session_shutdown", reason: "quit" }, ctx);
+
+      expect(client.calls.filter((call) => call.method === "seal")).toHaveLength(2);
+      expect(client.calls.filter((call) => call.method === "record")).toEqual([
+        expect.objectContaining({ captureID: "capture-1" }),
+        expect.objectContaining({ captureID: "capture-2" }),
+      ]);
+      expect(lifecycle.currentCaptureID()).toBeUndefined();
+    },
+  );
+
+  it("cancels tree navigation when the active Capture cannot be sealed", async () => {
+    const { pi, client, lifecycle, ctx } = setup();
+    addCaptureAncestor(pi);
+    await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
+    appendWriteExchange(pi, "first", "src/first.ts");
+    client.fail.add("seal");
+
+    const results = await pi.emitResults("session_before_tree", {
+      type: "session_before_tree",
+      preparation: {
+        targetId: "before-capture",
+        oldLeafId: pi.leaf,
+        commonAncestorId: "before-capture",
+        entriesToSummarize: [],
+        userWantsSummary: false,
+      },
+      signal: new AbortController().signal,
+    }, ctx);
+
+    expect(results).toEqual([{ cancel: true }]);
+    expect(lifecycle.currentCaptureID()).toBe("capture-1");
   });
 
   it("publishes before starting the rollover replacement", async () => {
