@@ -1,3 +1,7 @@
+import {
+  DEFAULT_MAX_BYTES,
+  DEFAULT_MAX_LINES,
+} from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
 import { renderEpisode, renderFileContext } from "./render.ts";
@@ -81,5 +85,27 @@ describe("renderEpisode", () => {
     expect(rendered).toContain("Paths:\n- src/a.ts");
     expect(rendered).toContain("L1:\nShort summary\nL2:\nLong summary");
     expect(rendered).toContain("Transcript reference: /sessions/pi.jsonl");
+  });
+
+  it.each([
+    ["bytes", ["src/a.ts"], "x".repeat(DEFAULT_MAX_BYTES * 2)],
+    ["lines", Array.from({ length: DEFAULT_MAX_LINES * 2 }, (_, index) => `src/${index}.ts`), "L2"],
+  ])("bounds %s while preserving the trust wrapper", (_limit, paths, l2) => {
+    const rendered = renderEpisode({
+      episode_id: "episode-1",
+      harness: "pi",
+      paths,
+      l1: "Short summary",
+      l2,
+      transcript_ref: "/sessions/pi.jsonl",
+      started_at: "2026-01-01T00:00:00Z",
+      ended_at: "2026-01-01T00:01:00Z",
+    });
+
+    expect(Buffer.byteLength(rendered)).toBeLessThanOrEqual(DEFAULT_MAX_BYTES);
+    expect(rendered.split("\n").length).toBeLessThanOrEqual(DEFAULT_MAX_LINES);
+    expect(rendered).toContain("[Episode output truncated");
+    expect(rendered.startsWith('<madeleine-episode trust="untrusted-data"')).toBe(true);
+    expect(rendered.endsWith("</madeleine-episode>")).toBe(true);
   });
 });

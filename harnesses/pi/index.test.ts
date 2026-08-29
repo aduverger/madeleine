@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { registerMadeleine } from "./index.ts";
@@ -108,16 +109,22 @@ describe("read enrichment", () => {
     expect(event.content).toHaveLength(1);
   });
 
-  it("injects repeated paths once and distinct paths separately", async () => {
-    const { extension, ctx } = await extensionWith({ contextEpisodes: [oneSummary()] });
+  it("normalizes Pi read paths before lookup and deduplication", async () => {
+    const { extension, fake, ctx } = await extensionWith({ contextEpisodes: [oneSummary()] });
 
-    const [first] = await extension.emit("tool_result", readEvent("src/a.ts"), ctx.value);
-    const [repeat] = await extension.emit("tool_result", readEvent("./src/a.ts"), ctx.value);
+    const [first] = await extension.emit("tool_result", readEvent("@src/a.ts"), ctx.value);
+    const [repeat] = await extension.emit("tool_result", readEvent("src/a.ts"), ctx.value);
     const [distinct] = await extension.emit("tool_result", readEvent("src/b.ts"), ctx.value);
 
     expect(first).toBeDefined();
     expect(repeat).toBeUndefined();
     expect(distinct).toBeDefined();
+    const requests = await fake.requests();
+    expect(requests[1]).toMatchObject({
+      request: {
+        params: { paths: [resolve(ctx.value.cwd, "src/a.ts")] },
+      },
+    });
   });
 
   it("keeps five summaries in the order returned by the core", async () => {
