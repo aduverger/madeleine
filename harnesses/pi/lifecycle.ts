@@ -14,16 +14,43 @@ import { fileURLToPath } from "node:url";
 
 import type { Capture, FinalizationDraft } from "./rpc.ts";
 import { PiState, type ConversationIdentity } from "./state.ts";
+import {
+  EpisodeFinalizer,
+  type EpisodeFinalization,
+  type SummaryClient,
+} from "./summary.ts";
 
 const writeRefreshIntervalMs = 30_000;
 const unicodeSpaces = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 
+export type FinalizationOutcome = EpisodeFinalization | {
+  captureID: string;
+  status: "pending";
+};
+
 export interface RolloverResult {
-  sealed: FinalizationDraft;
+  finalization: FinalizationOutcome;
   startedCaptureID: string;
 }
 
-export interface CaptureClient {
+export type RetryResult = {
+  captureID: string;
+  status: "failed";
+} | {
+  captureID: string;
+  status: "published";
+  episodeID: string;
+};
+
+export interface CaptureFinalizer {
+  finalize(
+    draft: FinalizationDraft,
+    ctx: ExtensionContext,
+    signal?: AbortSignal,
+  ): Promise<EpisodeFinalization>;
+}
+
+export interface CaptureClient extends SummaryClient {
   startCapture(
     repositoryRoot: string,
     externalID: string,
@@ -50,12 +77,17 @@ export class CaptureLifecycle {
   private readonly writePathsInFlight = new Set<string>();
   private readonly sentNotifications = new Set<string>();
 
+  private readonly finalizer: CaptureFinalizer;
+
   constructor(
     private readonly client: CaptureClient,
     private readonly state: PiState,
     private readonly ensureReady: (ctx: ExtensionContext) => Promise<boolean>,
     private readonly monotonicNow: () => number = () => performance.now(),
-  ) {}
+    finalizer?: CaptureFinalizer,
+  ) {
+    this.finalizer = finalizer ?? new EpisodeFinalizer(client);
+  }
 
   register(pi: ExtensionAPI): void {
     pi.on("session_start", (event, ctx) => this.start(event, ctx));
@@ -79,15 +111,49 @@ export class CaptureLifecycle {
 
     this.workController.abort();
     try {
-      const sealed = await this.sealCapture(captureID, ctx);
+      const finalization = await this.sealAndFinalize(captureID, ctx);
       this.resetCaptureWork();
       await this.createCapture(ctx);
       if (!this.captureID) throw new Error("Madeleine could not start a replacement Capture");
-      return { sealed, startedCaptureID: this.captureID };
+      return { finalization, startedCaptureID: this.captureID };
     } catch (error) {
       if (this.captureID) this.workController = new AbortController();
       throw error;
     }
+  }
+
+  async retry(captureID: string | undefined, ctx: ExtensionContext): Promise<RetryResult[]> {
+    if (!this.conversation) throw new Error("Madeleine has no active Conversation");
+    const pending = (await this.client.listPendingCaptures(
+      this.repositoryRoot,
+      this.conversation.externalID,
+    )).filter((capture) => capture.status === "pending_summary");
+    const captures = captureID
+      ? pending.filter((capture) => capture.id === captureID)
+      : pending;
+    if (captureID && captures.length === 0) {
+      throw new Error("Capture is not pending in the current Conversation");
+    }
+
+    const results: RetryResult[] = [];
+    for (const capture of captures) {
+      try {
+        if (!capture.end_cursor) throw new Error("Pending Capture has no end cursor");
+        const draft = await this.client.sealCapture(capture.id, capture.end_cursor);
+        const finalization = await this.finalizer.finalize(draft, ctx);
+        if (finalization.status !== "published") {
+          throw new Error("Pending Capture was unexpectedly abandoned");
+        }
+        results.push({
+          captureID: capture.id,
+          status: "published",
+          episodeID: finalization.episodeID,
+        });
+      } catch {
+        results.push({ captureID: capture.id, status: "failed" });
+      }
+    }
+    return results;
   }
 
   private async start(event: SessionStartEvent, ctx: ExtensionContext): Promise<void> {
@@ -208,16 +274,26 @@ export class CaptureLifecycle {
     if (event.reason === "reload" || !this.captureID) return;
 
     try {
-      await this.sealCapture(this.captureID, ctx);
+      const result = await this.sealAndFinalize(this.captureID, ctx);
+      if (result.status === "pending") {
+        this.notifyOnce(ctx, "summary", "Madeleine could not publish the sealed Capture; it remains pending.");
+      }
     } catch {
       this.notifyOnce(ctx, "seal", "Madeleine could not seal the current Capture; it remains recoverable.");
     }
   }
 
-  private async sealCapture(captureID: string, ctx: ExtensionContext): Promise<FinalizationDraft> {
+  private async sealAndFinalize(
+    captureID: string,
+    ctx: ExtensionContext,
+  ): Promise<FinalizationOutcome> {
     const draft = await this.client.sealCapture(captureID, this.state.ensureCursor(ctx));
     this.clearCurrentCapture(captureID);
-    return draft;
+    try {
+      return await this.finalizer.finalize(draft, ctx, ctx.signal);
+    } catch {
+      return { captureID, status: "pending" };
+    }
   }
 
   private resetCaptureWork(): void {

@@ -2,8 +2,12 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { CaptureLifecycle, type CaptureClient } from "./lifecycle.ts";
-import type { Capture, FinalizationDraft } from "./rpc.ts";
+import {
+  CaptureLifecycle,
+  type CaptureClient,
+  type CaptureFinalizer,
+} from "./lifecycle.ts";
+import type { Capture, Episode, FinalizationDraft } from "./rpc.ts";
 import { PiState, stateEntryType } from "./state.ts";
 
 type Handler = (event: any, ctx: ExtensionContext) => Promise<unknown> | unknown;
@@ -84,11 +88,12 @@ class FakeClient implements CaptureClient {
     });
   }
 
-  async sealCapture(captureID: string, _endCursor: string): Promise<FinalizationDraft> {
+  async sealCapture(captureID: string, endCursor: string): Promise<FinalizationDraft> {
     this.maybeFail("seal");
     this.calls.push({ method: "seal", captureID });
     const capture = this.captures.find((candidate) => candidate.id === captureID)!;
     capture.status = this.emptySeal ? "abandoned" : "pending_summary";
+    capture.end_cursor = endCursor;
     return {
       capture_id: captureID,
       status: capture.status,
@@ -97,9 +102,37 @@ class FakeClient implements CaptureClient {
     };
   }
 
+  async publishEpisode(captureID: string, l1: string, l2: string): Promise<Episode> {
+    this.maybeFail("publish");
+    this.calls.push({ method: "publish", captureID });
+    const capture = this.captures.find((candidate) => candidate.id === captureID)!;
+    capture.status = "finalized";
+    capture.episode_id = `episode-${captureID}`;
+    return episodeRecord(capture, l1, l2);
+  }
+
   private maybeFail(method: string): void {
     if (this.fail.has(method)) throw new Error(`${method} failed`);
   }
+}
+
+function episodeRecord(capture: Capture, l1: string, l2: string): Episode {
+  return {
+    id: capture.episode_id!,
+    capture_id: capture.id,
+    repository_id: capture.repository_id,
+    conversation_id: capture.conversation_id,
+    conversation_key: capture.conversation_key,
+    harness: "pi",
+    paths: ["src/a.ts"],
+    l1,
+    l2,
+    start_cursor: capture.start_cursor,
+    end_cursor: capture.end_cursor!,
+    started_at: capture.started_at,
+    ended_at: "2026-01-01T00:01:00Z",
+    created_at: "2026-01-01T00:01:01Z",
+  };
 }
 
 function captureRecord(id: string, externalID: string, overrides: Partial<Capture> = {}): Capture {
@@ -128,16 +161,20 @@ function testContext(pi: FakePi, sessionFile = "/sessions/current.jsonl") {
       getSessionFile: () => sessionFile,
       getLeafId: () => pi.leaf,
       getBranch: () => pi.entries,
+      getEntries: () => pi.entries,
     },
   } as unknown as ExtensionContext;
   return { ctx, notify, externalID: resolve(sessionFile) };
 }
 
-function setup(now: () => number = () => 0) {
+function setup(
+  now: () => number = () => 0,
+  finalizer?: CaptureFinalizer,
+) {
   const pi = new FakePi();
   const client = new FakeClient();
   const state = new PiState(pi.api);
-  const lifecycle = new CaptureLifecycle(client, state, async () => true, now);
+  const lifecycle = new CaptureLifecycle(client, state, async () => true, now, finalizer);
   lifecycle.register(pi.api);
   const context = testContext(pi);
   return { pi, client, state, lifecycle, ...context };
@@ -245,19 +282,53 @@ describe("Capture lifecycle", () => {
     },
   );
 
+  it("publishes on every clean shutdown reason", async () => {
+    for (const reason of ["quit", "new", "resume", "fork"] as const) {
+      const finalize = vi.fn(async (sealed: FinalizationDraft) => ({
+        captureID: sealed.capture_id,
+        status: "published" as const,
+        episodeID: `episode-${sealed.capture_id}`,
+      }));
+      const { pi, ctx } = setup(() => 0, { finalize });
+      await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
+      await pi.emit("session_shutdown", { type: "session_shutdown", reason }, ctx);
+      expect(finalize).toHaveBeenCalledOnce();
+    }
+  });
+
   it("rolls over the current Capture without changing Conversation", async () => {
     const { pi, client, lifecycle, ctx, externalID } = setup();
     await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
 
     const result = await lifecycle.rollover(ctx);
 
-    expect(result).toMatchObject({
-      sealed: { capture_id: "capture-1", status: "pending_summary" },
+    expect(result).toEqual({
+      finalization: { captureID: "capture-1", status: "pending" },
+      startedCaptureID: "capture-2",
+    });
+    expect(client.calls.map((call) => call.method)).toEqual(["list", "start", "seal", "get", "start"]);
+    expect(client.captures[1]?.conversation_key.external_id).toBe(externalID);
+    expect(lifecycle.currentCaptureID()).toBe("capture-2");
+  });
+
+  it("publishes before starting the rollover replacement", async () => {
+    const finalize = vi.fn(async (sealed: FinalizationDraft) => ({
+      captureID: sealed.capture_id,
+      status: "published" as const,
+      episodeID: "episode-1",
+    }));
+    const { pi, client, lifecycle, ctx } = setup(() => 0, { finalize });
+    await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
+
+    await expect(lifecycle.rollover(ctx)).resolves.toEqual({
+      finalization: {
+        captureID: "capture-1",
+        status: "published",
+        episodeID: "episode-1",
+      },
       startedCaptureID: "capture-2",
     });
     expect(client.calls.map((call) => call.method)).toEqual(["list", "start", "seal", "start"]);
-    expect(client.captures[1]?.conversation_key.external_id).toBe(externalID);
-    expect(lifecycle.currentCaptureID()).toBe("capture-2");
   });
 
   it("keeps the current Capture usable when rollover sealing fails", async () => {
@@ -271,6 +342,53 @@ describe("Capture lifecycle", () => {
     client.fail.delete("seal");
     await pi.emit("tool_result", mutation("write", "src/a.ts"), ctx);
     expect(client.calls.at(-1)).toMatchObject({ method: "record", captureID: "capture-1" });
+  });
+
+  it("starts one rollover replacement when summary publication fails", async () => {
+    const finalize = vi.fn(async () => {
+      throw new Error("summary failed");
+    });
+    const { pi, client, lifecycle, ctx } = setup(() => 0, { finalize });
+    await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
+
+    await expect(lifecycle.rollover(ctx)).resolves.toEqual({
+      finalization: { captureID: "capture-1", status: "pending" },
+      startedCaptureID: "capture-2",
+    });
+    expect(client.calls.filter((call) => call.method === "start")).toHaveLength(2);
+  });
+
+  it("retries pending Captures oldest-first and continues after failure", async () => {
+    const attempted: string[] = [];
+    const finalizer: CaptureFinalizer = {
+      async finalize(sealed) {
+        attempted.push(sealed.capture_id);
+        if (sealed.capture_id === "capture-old") throw new Error("summary failed");
+        return {
+          captureID: sealed.capture_id,
+          status: "published",
+          episodeID: `episode-${sealed.capture_id}`,
+        };
+      },
+    };
+    const { pi, client, lifecycle, ctx, externalID } = setup(() => 0, finalizer);
+    client.captures.push(
+      captureRecord("capture-old", externalID, { status: "pending_summary", end_cursor: "end-old" }),
+      captureRecord("capture-new", externalID, { status: "pending_summary", end_cursor: "end-new" }),
+    );
+    await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
+
+    await expect(lifecycle.retry(undefined, ctx)).resolves.toEqual([
+      { captureID: "capture-old", status: "failed" },
+      { captureID: "capture-new", status: "published", episodeID: "episode-capture-new" },
+    ]);
+    expect(attempted).toEqual(["capture-old", "capture-new"]);
+  });
+
+  it("requires an explicit retry ID to be pending in the current Conversation", async () => {
+    const { pi, lifecycle, ctx } = setup();
+    await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
+    await expect(lifecycle.retry("capture-other", ctx)).rejects.toThrow("not pending");
   });
 
   it("preserves the open Capture on reload shutdown", async () => {
@@ -323,7 +441,7 @@ describe("Capture lifecycle", () => {
     await pi.emit("session_shutdown", { type: "session_shutdown", reason: "quit" }, ctx);
     await expect(write).resolves.toBeUndefined();
 
-    expect(client.calls.map((call) => call.method)).toEqual(["list", "start", "record", "seal"]);
+    expect(client.calls.map((call) => call.method)).toEqual(["list", "start", "record", "seal", "get"]);
   });
 
   it("treats an empty seal as successful abandonment", async () => {

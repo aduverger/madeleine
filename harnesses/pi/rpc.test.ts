@@ -18,6 +18,26 @@ async function fakeClient(spec: Parameters<typeof createFakeMadeleine>[0], optio
   };
 }
 
+function episodeResult() {
+  return {
+    id: "episode-1",
+    capture_id: "capture-1",
+    repository_id: "repository-1",
+    conversation_id: "conversation-1",
+    conversation_key: { harness: "pi", external_id: "session-1" },
+    harness: "pi",
+    paths: ["src/a.ts"],
+    l1: "Short summary",
+    l2: "Detailed brief",
+    transcript_ref: "/sessions/one.jsonl",
+    start_cursor: "entry-1",
+    end_cursor: "entry-2",
+    started_at: "2026-01-01T00:00:00Z",
+    ended_at: "2026-01-01T00:01:00Z",
+    created_at: "2026-01-01T00:01:01Z",
+  };
+}
+
 function captureResult() {
   return {
     id: "capture-1",
@@ -121,6 +141,7 @@ describe("RPCClient", () => {
             paths: ["src/a.ts"],
           },
         },
+        "episode.publish": { result: episodeResult() },
         "capture.abandon": { result: {} },
       },
     });
@@ -135,6 +156,9 @@ describe("RPCClient", () => {
       status: "pending_summary",
       paths: ["src/a.ts"],
     });
+    await expect(
+      client.publishEpisode("capture-1", "Short summary", "Detailed brief"),
+    ).resolves.toEqual(episodeResult());
     await expect(client.abandonCapture("capture-1")).resolves.toBeUndefined();
 
     const requests = await fake.requests();

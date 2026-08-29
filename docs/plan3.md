@@ -6,7 +6,8 @@ Design decisions: D-004, D-005, D-007, D-008, D-016, D-021
 
 > Historical note: paths and public-package references describe the merged PR.
 > Plan 6 later internalizes the Go implementation when Madeleine becomes a
-> standalone application.
+> standalone application. Plan 11 later replaces transcript-file references
+> with generated IDs for persisted bounded Transcripts.
 
 ## Goal
 
