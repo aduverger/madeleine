@@ -2,7 +2,7 @@
 
 PR scope: one PR  
 Depends on: `plan10.md`  
-Design decisions: D-006, D-014, D-015, D-016, D-019, D-020, D-021
+Design decisions: D-006, D-014, D-015, D-016, D-019, D-020, D-021, D-023
 
 ## Goal
 
@@ -22,9 +22,9 @@ slice, and documenting installation and operations.
 ## Files
 
 ```text
-extensions/madeleine/recovery.ts
-extensions/madeleine/lifecycle.ts
-extensions/madeleine/*.test.ts
+harnesses/pi/recovery.ts
+harnesses/pi/lifecycle.ts
+harnesses/pi/*.test.ts
 test/e2e/*
 README.md
 ```
@@ -119,7 +119,7 @@ Cover:
 
 ```text
 go install github.com/aduverger/madeleine/cmd/madeleine@main
-pi install git:github.com/aduverger/madeleine@main
+pi install npm:@aduverger/madeleine-pi@0.1.0
 ```
 
 - [ ] Document release installation using `@v0.1.0`, noting that the tag is

@@ -439,21 +439,29 @@ RPC methods mirror the Service operations. `madeleine doctor` is human-readable;
 The Pi adapter is a TypeScript package in the same repository:
 
 ```text
-package: @aduverger/madeleine
+package: @aduverger/madeleine-pi
 runtime: Node >= 22.19.0
-entry: extensions/madeleine/index.ts
+root: harnesses/pi
+entry: index.ts
 ```
 
-It uses the current `@earendil-works/pi-coding-agent`,
+Harness integrations live under `harnesses/<harness>`. Each directory owns
+that harness's lifecycle, tools, transcript references, and presentation. The
+versioned Madeleine CLI remains their shared boundary; no cross-harness adapter
+framework is introduced before a second implementation demonstrates shared
+code. Each harness owns its packaging under its directory and does not require
+other harnesses to use npm or Pi's package format.
+
+The Pi integration uses the current `@earendil-works/pi-coding-agent`,
 `@earendil-works/pi-ai`, and `typebox` peer packages. Pi loads TypeScript
-directly. The adapter invokes the Go binary through an argument-vector child
-process, never through a shell.
+directly. It invokes the Go binary through an argument-vector child process,
+never through a shell.
 
 Installation remains deliberately separate:
 
 ```text
 go install github.com/aduverger/madeleine/cmd/madeleine@v0.1.0
-pi install git:github.com/aduverger/madeleine@v0.1.0
+pi install npm:@aduverger/madeleine-pi@0.1.0
 ```
 
 `MADELEINE_BIN` overrides binary discovery. A missing binary disables the
@@ -601,6 +609,7 @@ reference boundary.
 | D-020 | Support macOS and Linux first. | Locked | CGo-free SQLite keeps later Windows support feasible. |
 | D-021 | Inspect Entire and reuse compatible code before rebuilding equivalent mechanics. | Locked | Each PR records reused provenance or why reuse did not fit; Madeleine's semantics remain authoritative. |
 | D-022 | Ship Madeleine as a standalone application with private Go packages and versioned JSON RPC as its external API. | Locked | Harnesses share one protocol; internal package structure can evolve without Go API compatibility constraints. |
+| D-023 | Organize and package harness integrations under `harnesses/<harness>`. | Locked | Each harness owns its integration mechanics and release format; only proven common behavior is shared through the CLI or later extraction. |
 
 ## Reference documentation
 
