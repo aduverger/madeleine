@@ -17,52 +17,70 @@ import (
 )
 
 const (
-	storeDatabaseName  = "madeleine.db"
+	databaseName       = "madeleine.db"
 	maxOpenConnections = 4
 )
 
-type Store struct {
+type DB struct {
 	db        *sql.DB
 	closeOnce sync.Once
 	closeErr  error
 }
 
-func Open(ctx context.Context, options Options) (*Store, error) {
-	home, err := resolveStoreHome(options.Home)
+type Tx struct {
+	tx *sql.Tx
+}
+
+func Open(ctx context.Context, configuredHome string) (*DB, error) {
+	home, err := resolveHome(configuredHome)
 	if err != nil {
-		return nil, wrapError("resolve store home", options.Home, err)
+		return nil, fmt.Errorf("resolve store home %q: %w", configuredHome, err)
 	}
 	if err := os.MkdirAll(home, 0o700); err != nil {
-		return nil, wrapError("create store home", home, err)
+		return nil, fmt.Errorf("create store home %q: %w", home, err)
 	}
 
-	db, err := openSQLite(filepath.Join(home, storeDatabaseName))
+	db, err := openSQLite(filepath.Join(home, databaseName))
 	if err != nil {
-		return nil, wrapError("open store", home, err)
+		return nil, fmt.Errorf("open store %q: %w", home, err)
 	}
 	if err := enableWAL(ctx, db); err != nil {
 		_ = db.Close()
-		return nil, wrapError("enable store WAL", home, err)
+		return nil, fmt.Errorf("enable store WAL %q: %w", home, err)
 	}
 	if err := verifyConnectionSettings(ctx, db); err != nil {
 		_ = db.Close()
-		return nil, wrapError("verify store settings", home, err)
+		return nil, fmt.Errorf("verify store settings %q: %w", home, err)
 	}
-	if err := migrateStore(ctx, db, embeddedMigrations); err != nil {
+	if err := migrate(ctx, db, embeddedMigrations); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Store{db: db}, nil
+	return &DB{db: db}, nil
 }
 
-func (s *Store) Close() error {
-	s.closeOnce.Do(func() {
-		s.closeErr = s.db.Close()
+func (db *DB) Close() error {
+	db.closeOnce.Do(func() {
+		db.closeErr = db.db.Close()
 	})
-	return s.closeErr
+	return db.closeErr
 }
 
-func resolveStoreHome(configured string) (string, error) {
+func (db *DB) WithTransaction(ctx context.Context, operation func(*Tx) error) error {
+	transaction, err := db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if err := operation(&Tx{tx: transaction}); err != nil {
+		if rollbackErr := transaction.Rollback(); rollbackErr != nil {
+			return errors.Join(err, rollbackErr)
+		}
+		return err
+	}
+	return transaction.Commit()
+}
+
+func resolveHome(configured string) (string, error) {
 	if configured != "" {
 		return filepath.Abs(configured)
 	}
@@ -75,10 +93,10 @@ func resolveStoreHome(configured string) (string, error) {
 	if err != nil && xdgDataHome == "" {
 		return "", err
 	}
-	return platformStoreHome(runtime.GOOS, xdgDataHome, userHome)
+	return platformHome(runtime.GOOS, xdgDataHome, userHome)
 }
 
-func platformStoreHome(goos, xdgDataHome, userHome string) (string, error) {
+func platformHome(goos, xdgDataHome, userHome string) (string, error) {
 	switch goos {
 	case "darwin":
 		return filepath.Join(userHome, "Library", "Application Support", "madeleine"), nil
@@ -173,22 +191,4 @@ func verifyConnectionSettings(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("busy timeout is %d ms, want 5000 ms", busyTimeout)
 	}
 	return nil
-}
-
-func withImmediateTransaction(ctx context.Context, db *sql.DB, operation func(*sql.Tx) error) error {
-	transaction, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if err := operation(transaction); err != nil {
-		if rollbackErr := transaction.Rollback(); rollbackErr != nil {
-			return errors.Join(err, rollbackErr)
-		}
-		return err
-	}
-	return transaction.Commit()
-}
-
-func utcTimestamp() string {
-	return time.Now().UTC().Format(time.RFC3339Nano)
 }

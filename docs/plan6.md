@@ -32,16 +32,16 @@ internal/store   internal/gitstate
 
 Dependency rules:
 
-- [ ] `internal/madeleine` owns Repository, Conversation, Capture, and Episode
+- [x] `internal/madeleine` owns Repository, Conversation, Capture, and Episode
   vocabulary, validation, state transitions, errors, and use-case orchestration.
-- [ ] `internal/store` owns SQLite setup, migrations, SQL, row scanning,
+- [x] `internal/store` owns SQLite setup, migrations, SQL, row scanning,
   transaction lifetime, and persistence records.
-- [ ] `internal/store` must not import `internal/madeleine`.
-- [ ] `internal/madeleine` uses one concrete `*store.DB`; do not add a storage
+- [x] `internal/store` must not import `internal/madeleine`.
+- [x] `internal/madeleine` uses one concrete `*store.DB`; do not add a storage
   interface, alternate backend, mock framework, or dependency-injection layer.
-- [ ] `internal/gitstate`, `internal/gitcmd`, and `internal/repopath` retain
+- [x] `internal/gitstate`, `internal/gitcmd`, and `internal/repopath` retain
   their existing focused responsibilities.
-- [ ] Do not create generic `app`, `core`, `model`, `service`, `util`, or
+- [x] Do not create generic `app`, `core`, `model`, `service`, `util`, or
   `common` packages.
 
 ## Application package
@@ -59,17 +59,17 @@ context.go
 git_reconcile.go
 ```
 
-- [ ] Move the canonical domain and RPC request/result types here; retain their
+- [x] Move the canonical domain and RPC request/result types here; retain their
   JSON tags because Plan 7 serializes them directly.
-- [ ] Use `Service` for the application entry point. `Open` constructs the
+- [x] Use `Service` for the application entry point. `Open` constructs the
   concrete SQLite store and `Close` releases it.
-- [ ] Keep UUID generation, Capture transitions, Episode validation, repository
+- [x] Keep UUID generation, Capture transitions, Episode validation, repository
   discovery, origin normalization, path attribution policy, and Git
   reconciliation policy in this package.
-- [ ] Preserve the operation signatures currently exposed by the root `Store`
+- [x] Preserve the operation signatures currently exposed by the root `Store`
   as private `Service` methods so Plan 7 can dispatch to them without another
   domain model.
-- [ ] Map storage absence, conflicts, and compare-and-set failures to the
+- [x] Map storage absence, conflicts, and compare-and-set failures to the
   existing Madeleine sentinel errors here.
 
 ## SQLite store
@@ -78,6 +78,7 @@ Refactor `internal/store` to contain:
 
 ```text
 database.go
+records.go
 migrations.go
 repository.go
 conversation.go
@@ -88,27 +89,27 @@ git_baseline.go
 migrations/*.sql
 ```
 
-- [ ] Name persistence values precisely: `RepositoryRecord`, `CaptureRecord`,
+- [x] Name persistence values precisely: `RepositoryRecord`, `CaptureRecord`,
   `EpisodeRecord`, `EpisodeSummaryRecord`, and `GitBaselineRecord`.
-- [ ] Return `(record, found, error)` for optional rows and affected-row counts
+- [x] Return `(record, found, error)` for optional rows and affected-row counts
   for compare-and-set operations; do not duplicate Madeleine sentinel errors.
-- [ ] Provide `DB.WithTransaction(ctx, func(*store.Tx) error)` for application
+- [x] Provide `DB.WithTransaction(ctx, func(*store.Tx) error)` for application
   rules that must run inside one immediate transaction.
-- [ ] Expose named persistence operations on `DB` and `Tx`; do not expose raw
+- [x] Expose named persistence operations on `DB` and `Tx`; do not expose raw
   SQL or `*sql.Tx` to `internal/madeleine`.
-- [ ] Keep all SQL statements and row scanners in this package.
-- [ ] Keep migration SQL and version history byte-for-byte unchanged.
+- [x] Keep all SQL statements and row scanners in this package.
+- [x] Keep migration SQL and version history byte-for-byte unchanged.
 
 The application layer must continue to own the decisions inside these atomic
 flows while the store owns their mechanics:
 
-- [ ] repository alias matching and registration;
-- [ ] Conversation get-or-create and transcript refresh;
-- [ ] Capture creation plus Git baseline insertion;
-- [ ] write recording plus last-seen update;
-- [ ] sealing plus Git path insertion and terminal cleanup;
-- [ ] Episode publication plus Capture finalization and cleanup;
-- [ ] abandonment plus raw-state cleanup.
+- [x] repository alias matching and registration;
+- [x] Conversation get-or-create and transcript refresh;
+- [x] Capture creation plus Git baseline insertion;
+- [x] write recording plus last-seen update;
+- [x] sealing plus Git path insertion and terminal cleanup;
+- [x] Episode publication plus Capture finalization and cleanup;
+- [x] abandonment plus raw-state cleanup.
 
 ## Remove the public Go library
 
@@ -129,56 +130,67 @@ adds the installable `cmd/madeleine` executable.
 
 ## Test migration
 
-- [ ] Move domain, repository-discovery, lifecycle, and application-operation
+- [x] Move domain, repository-discovery, lifecycle, and application-operation
   tests to `internal/madeleine`.
-- [ ] Keep migration, schema, transaction, SQL, and persistence-constraint tests
+- [x] Keep migration, schema, transaction, SQL, and persistence-constraint tests
   in `internal/store`.
-- [ ] Replace the public facade test with one internal end-to-end Service test
+- [x] Replace the public facade test with one internal end-to-end Service test
   covering Repository resolution through Episode context retrieval.
-- [ ] Preserve real SQLite, real Git, concurrent process, rollback, idempotency,
+- [x] Preserve real SQLite, real Git, concurrent process, rollback, idempotency,
   and non-mutating Git coverage.
-- [ ] Test package dependency direction so `internal/store` cannot begin
+- [x] Test package dependency direction so `internal/store` cannot begin
   importing `internal/madeleine` unnoticed.
 
 ## Documentation migration
 
-- [ ] Update `README.md` to describe a standalone CLI rather than a reusable Go
+- [x] Update `README.md` to describe a standalone CLI rather than a reusable Go
   library and update the architecture diagram.
-- [ ] Update `docs/design.md`: make JSON RPC the sole external API, document the
+- [x] Update `docs/design.md`: make JSON RPC the sole external API, document the
   private package graph, mark D-010 superseded, and add D-022.
-- [ ] Add a historical note to Plans 1-5 instead of rewriting their merged file
+- [x] Add a historical note to Plans 1-5 instead of rewriting their merged file
   lists and implementation provenance.
-- [ ] Renumber the former Plans 6-10 to Plans 7-11 and update every dependency,
+- [x] Renumber the former Plans 6-10 to Plans 7-11 and update every dependency,
   forward reference, and plan-range reference.
-- [ ] Update the CLI plan to import `internal/madeleine`; later Pi plans remain
+- [x] Update the CLI plan to import `internal/madeleine`; later Pi plans remain
   clients of JSON RPC only.
 
 ## Verification
 
-- [ ] `go list ./...` reports no root `github.com/aduverger/madeleine` package.
-- [ ] `make check` passes.
-- [ ] `go test -race ./...` passes.
-- [ ] `go test ./... -shuffle=on -count=3` passes.
-- [ ] `git diff --check` passes.
+- [x] `go list ./...` reports no root `github.com/aduverger/madeleine` package.
+- [x] `make check` passes.
+- [x] `go test -race ./...` passes.
+- [x] `go test ./... -shuffle=on -count=3` passes.
+- [x] `git diff --check` passes.
 
 ## Implementation assumptions, plan changes, and research
 
 Listed least-confident first:
 
-1. `internal/madeleine` intentionally repeats the product name. As the private
+1. Two non-timeout `internal/gitcmd` tests now use the existing five-second
+   discovery budget instead of a one-second test-only budget. Repeated shuffled
+   runs consistently exhausted one second while starting the fake executable;
+   production timeout behavior is unchanged.
+2. Application tests open a separate test-only SQLite connection for schema
+   assertions and injected failures. This preserves the existing transaction
+   and rollback coverage without exposing `*sql.DB` or raw SQL from production
+   `internal/store` APIs.
+3. `internal/store/records.go` was added to the proposed file list so persistence
+   record definitions have one clear owner instead of being scattered through
+   SQL operation files.
+4. `internal/madeleine` intentionally repeats the product name. As the private
    product/application layer it gives clients meaningful names such as
    `madeleine.Service` and `madeleine.Capture`; generic package names such as
    `app`, `core`, and `model` were rejected.
-2. The concrete application service depends directly on `*store.DB`. A storage
+5. The concrete application service depends directly on `*store.DB`. A storage
    interface would exist only to support a hypothetical second backend or unit
    mocks; neither is required by the MVP.
-3. Plans 1-5 remain historical records of merged PRs. They receive a migration
+6. Plans 1-5 remain historical records of merged PRs. They receive a migration
    note, but their checked file lists and upstream provenance are not rewritten
    to pretend the application-only layout existed earlier.
-4. The unimplemented plan stack is renumbered rather than adding a `plan6a` or
+7. The unimplemented plan stack is renumbered rather than adding a `plan6a` or
    out-of-band migration document: Plan 6 is this migration, Plan 7 is the CLI,
    and the Pi/MVP work continues through Plan 11.
-5. This layout follows the official Go module guidance for applications with
+8. This layout follows the official Go module guidance for applications with
    `cmd` and private supporting packages, Go package-naming guidance to create
    meaningful boundaries, and the packages-as-layers rule that dependencies
    point one way. References:
@@ -189,14 +201,14 @@ Listed least-confident first:
 
 ## Acceptance criteria
 
-- [ ] Madeleine has one private canonical domain model and no public Go facade.
-- [ ] Business rules live in `internal/madeleine`, not `internal/store`.
-- [ ] SQLite implementation details live in `internal/store`, not
+- [x] Madeleine has one private canonical domain model and no public Go facade.
+- [x] Business rules live in `internal/madeleine`, not `internal/store`.
+- [x] SQLite implementation details live in `internal/store`, not
   `internal/madeleine`.
-- [ ] Package imports are acyclic and follow the documented direction.
-- [ ] Database schema, migrations, persisted values, and runtime behavior are
+- [x] Package imports are acyclic and follow the documented direction.
+- [x] Database schema, migrations, persisted values, and runtime behavior are
   unchanged.
-- [ ] Plan 7 can implement RPC directly against `*madeleine.Service`.
+- [x] Plan 7 can implement RPC directly against `*madeleine.Service`.
 
 ## Excluded from this PR
 

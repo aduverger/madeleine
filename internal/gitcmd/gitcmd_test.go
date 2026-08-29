@@ -18,7 +18,7 @@ printf 'stdout:%s' "$2"
 printf 'warning only' >&2
 `)
 	argument := `$(touch should-not-exist)`
-	output, err := Run(context.Background(), executable, t.TempDir(), []string{"status", argument}, time.Second)
+	output, err := Run(context.Background(), executable, t.TempDir(), []string{"status", argument}, DiscoveryTimeout)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -71,7 +71,7 @@ printf '%s|%s|%s' "${GIT_DIR-unset}" "${GIT_WORK_TREE-unset}" "${GIT_INDEX_FILE-
 	t.Setenv("GIT_WORK_TREE", "/wrong/worktree")
 	t.Setenv("GIT_INDEX_FILE", "/wrong/index")
 
-	output, err := Run(context.Background(), executable, t.TempDir(), []string{"status"}, time.Second)
+	output, err := Run(context.Background(), executable, t.TempDir(), []string{"status"}, DiscoveryTimeout)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

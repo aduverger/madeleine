@@ -1,4 +1,4 @@
-package store
+package madeleine
 
 import (
 	"context"
@@ -100,7 +100,7 @@ func TestConcurrentStartCaptureAllowsOneOpenCapture(t *testing.T) {
 
 	home := t.TempDir()
 	root := newTestGitRepository(t, "")
-	stores := []*Store{openTestStore(t, home), openTestStore(t, home)}
+	stores := []*testService{openTestStore(t, home), openTestStore(t, home)}
 	for _, store := range stores {
 		defer store.Close()
 	}
@@ -244,7 +244,7 @@ func TestConcurrentRecordWriteIsIdempotent(t *testing.T) {
 
 	home := t.TempDir()
 	root := newTestGitRepository(t, "")
-	stores := make([]*Store, 6)
+	stores := make([]*testService, 6)
 	for index := range stores {
 		stores[index] = openTestStore(t, home)
 		defer stores[index].Close()
@@ -629,29 +629,12 @@ func TestOpenCaptureAndPathsSurviveStoreReopen(t *testing.T) {
 	}
 }
 
-func TestCaptureSchemaIndexes(t *testing.T) {
-	t.Parallel()
-
-	store := openTestStore(t, t.TempDir())
-	defer store.Close()
-	indexes := []string{
-		"captures_one_open_per_conversation_idx",
-		"captures_repository_status_started_idx",
-		"captures_conversation_status_started_idx",
-	}
-	for _, index := range indexes {
-		if !databaseObjectExists(t, store.db, "index", index) {
-			t.Errorf("index %q does not exist", index)
-		}
-	}
-}
-
-func startTestCapture(t *testing.T, store *Store, root, externalID string) Capture {
+func startTestCapture(t *testing.T, store *testService, root, externalID string) Capture {
 	t.Helper()
 	return startCaptureWithKey(t, store, root, ConversationKey{Harness: HarnessPi, ExternalID: externalID})
 }
 
-func startCaptureWithKey(t *testing.T, store *Store, root string, key ConversationKey) Capture {
+func startCaptureWithKey(t *testing.T, store *testService, root string, key ConversationKey) Capture {
 	t.Helper()
 	capture, err := store.StartCapture(context.Background(), StartCaptureRequest{
 		RepositoryRoot:  root,

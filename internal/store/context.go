@@ -2,63 +2,24 @@ package store
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/aduverger/madeleine/internal/repopath"
 )
 
-const maxEpisodesPerPath = 5
-
-func (s *Store) ContextForPaths(ctx context.Context, request ContextRequest) ([]FileContext, error) {
-	repository, err := s.ResolveRepository(ctx, request.RepositoryRoot)
-	if err != nil {
-		return nil, err
-	}
-
-	contexts, contextIndexByPath, err := normalizeContextPaths(repository.WorktreeRoot, request.Paths)
-	if err != nil {
-		return nil, err
-	}
-	if len(contexts) == 0 {
-		return contexts, nil
-	}
-	if err := s.populateEpisodeContext(
-		ctx, request.RepositoryRoot, repository.ID, contexts, contextIndexByPath,
-	); err != nil {
-		return nil, err
-	}
-	return contexts, nil
-}
-
-func normalizeContextPaths(worktreeRoot string, requestedPaths []string) ([]FileContext, map[string]int, error) {
-	contexts := make([]FileContext, 0, len(requestedPaths))
-	contextIndexByPath := make(map[string]int, len(requestedPaths))
-	for _, requestedPath := range requestedPaths {
-		path, err := repopath.Normalize(worktreeRoot, requestedPath)
-		if err != nil {
-			return nil, nil, err
-		}
-		if _, exists := contextIndexByPath[path]; exists {
-			continue
-		}
-		contextIndexByPath[path] = len(contexts)
-		contexts = append(contexts, FileContext{Path: path, Episodes: []EpisodeSummary{}})
-	}
-	return contexts, contextIndexByPath, nil
-}
-
-func episodeContextQuery(repositoryID RepositoryID, contexts []FileContext) (string, []any) {
-	placeholders := make([]string, len(contexts))
-	arguments := make([]any, 0, len(contexts)+3)
+func (db *DB) EpisodeSummariesForPaths(
+	ctx context.Context,
+	repositoryID string,
+	paths []string,
+	limit int,
+) ([]EpisodeSummaryRecord, error) {
+	placeholders := make([]string, len(paths))
+	arguments := make([]any, 0, len(paths)+3)
 	arguments = append(arguments, repositoryID)
-	for index, fileContext := range contexts {
+	for index, path := range paths {
 		placeholders[index] = "?"
-		arguments = append(arguments, fileContext.Path)
+		arguments = append(arguments, path)
 	}
-	arguments = append(arguments, repositoryID, maxEpisodesPerPath)
+	arguments = append(arguments, repositoryID, limit)
 
 	query := `
 		WITH ranked_episodes AS (
@@ -77,72 +38,26 @@ func episodeContextQuery(repositoryID RepositoryID, contexts []FileContext) (str
 		FROM ranked_episodes
 		WHERE recency_rank <= ?
 		ORDER BY path, ended_at DESC, id DESC`
-	return query, arguments
-}
-
-func (s *Store) populateEpisodeContext(
-	ctx context.Context,
-	reference string,
-	repositoryID RepositoryID,
-	contexts []FileContext,
-	contextIndexByPath map[string]int,
-) error {
-	query, arguments := episodeContextQuery(repositoryID, contexts)
-	rows, err := s.db.QueryContext(ctx, query, arguments...)
+	rows, err := db.db.QueryContext(ctx, query, arguments...)
 	if err != nil {
-		return wrapError("get context for paths", reference, err)
+		return nil, err
 	}
 	defer rows.Close()
 
+	summaries := make([]EpisodeSummaryRecord, 0)
 	for rows.Next() {
-		var path, endedAt string
-		var summary EpisodeSummary
-		if err := rows.Scan(&path, &summary.EpisodeID, &endedAt, &summary.Harness, &summary.L1); err != nil {
-			return wrapError("get context for paths", reference, err)
+		var summary EpisodeSummaryRecord
+		var endedAt string
+		if err := rows.Scan(
+			&summary.Path, &summary.EpisodeID, &endedAt, &summary.Harness, &summary.L1,
+		); err != nil {
+			return nil, err
 		}
-		summary.EndedAt, err = parseStoredTimestamp(endedAt)
+		summary.EndedAt, err = parseTimestamp(endedAt)
 		if err != nil {
-			return wrapError("get context for paths", path, fmt.Errorf("parse Episode end time: %w", err))
+			return nil, fmt.Errorf("parse Episode end time: %w", err)
 		}
-		contextIndex, exists := contextIndexByPath[path]
-		if !exists {
-			return wrapError("get context for paths", path, ErrInvalidState)
-		}
-		contexts[contextIndex].Episodes = append(contexts[contextIndex].Episodes, summary)
+		summaries = append(summaries, summary)
 	}
-	if err := rows.Err(); err != nil {
-		return wrapError("get context for paths", reference, err)
-	}
-	return nil
-}
-
-func (s *Store) GetEpisode(ctx context.Context, request EpisodeRequest) (EpisodeDetail, error) {
-	if request.RepositoryRoot == "" || request.EpisodeID == "" {
-		return EpisodeDetail{}, wrapError("get Episode", string(request.EpisodeID), ErrInvalidState)
-	}
-	repository, err := s.ResolveRepository(ctx, request.RepositoryRoot)
-	if err != nil {
-		return EpisodeDetail{}, err
-	}
-	episode, err := loadEpisode(ctx, s.db, repository.ID, request.EpisodeID)
-	if errors.Is(err, sql.ErrNoRows) {
-		err = ErrNotFound
-	}
-	if err != nil {
-		return EpisodeDetail{}, wrapError("get Episode", string(request.EpisodeID), err)
-	}
-	return EpisodeDetail{
-		EpisodeID:       episode.ID,
-		ConversationID:  episode.ConversationID,
-		ConversationKey: episode.ConversationKey,
-		Harness:         episode.Harness,
-		Paths:           episode.Paths,
-		L1:              episode.L1,
-		L2:              episode.L2,
-		TranscriptRef:   episode.TranscriptRef,
-		StartCursor:     episode.StartCursor,
-		EndCursor:       episode.EndCursor,
-		StartedAt:       episode.StartedAt,
-		EndedAt:         episode.EndedAt,
-	}, nil
+	return summaries, rows.Err()
 }

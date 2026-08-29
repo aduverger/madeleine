@@ -1,4 +1,4 @@
-package store
+package madeleine
 
 import (
 	"context"
@@ -169,7 +169,7 @@ func TestGetEpisodeReturnsRepositoryScopedDetail(t *testing.T) {
 	}
 }
 
-func publishTestEpisodeAt(t *testing.T, store *Store, root, endedAt string, paths ...string) Episode {
+func publishTestEpisodeAt(t *testing.T, store *testService, root, endedAt string, paths ...string) Episode {
 	t.Helper()
 	capture := sealTestCaptureWithPaths(t, store, root, "episode-"+endedAt+"-"+paths[0], paths...)
 	if _, err := store.db.Exec(
