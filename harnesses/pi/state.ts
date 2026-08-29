@@ -18,8 +18,8 @@ export interface ConversationIdentity {
 }
 
 export class PiState {
-  private conversationID = "";
-  private captureID: string | undefined;
+  private externalConversationID = "";
+  private activeCaptureID: string | undefined;
   private readonly injectedPaths = new Set<string>();
   private readonly inFlightPaths = new Set<string>();
 
@@ -33,31 +33,31 @@ export class PiState {
     const persistedExternalID = sessionFile ? resolve(sessionFile) : undefined;
     const restored = reason === "reload" ? newestState(ctx, persistedExternalID) : undefined;
 
-    this.conversationID = persistedExternalID ?? restored?.conversation_id ?? this.generateID();
-    this.captureID = restored?.capture_id;
+    this.externalConversationID = persistedExternalID ?? restored?.conversation_id ?? this.generateID();
+    this.activeCaptureID = restored?.capture_id;
     this.injectedPaths.clear();
     for (const path of restored?.injected_paths ?? []) this.injectedPaths.add(path);
     this.inFlightPaths.clear();
 
     return {
-      externalID: this.conversationID,
+      externalID: this.externalConversationID,
       transcriptRef: persistedExternalID ?? "",
     };
   }
 
   currentCaptureID(): string | undefined {
-    return this.captureID;
+    return this.activeCaptureID;
   }
 
   attachCapture(captureID: string): void {
-    this.captureID = captureID;
+    this.activeCaptureID = captureID;
     this.injectedPaths.clear();
     this.inFlightPaths.clear();
     this.save();
   }
 
   clearCapture(): void {
-    this.captureID = undefined;
+    this.activeCaptureID = undefined;
     this.injectedPaths.clear();
     this.inFlightPaths.clear();
   }
@@ -89,11 +89,11 @@ export class PiState {
   }
 
   private save(): void {
-    if (!this.captureID) return;
+    if (!this.activeCaptureID) return;
     this.pi.appendEntry<PersistedState>(stateEntryType, {
       version: 1,
-      conversation_id: this.conversationID,
-      capture_id: this.captureID,
+      conversation_id: this.externalConversationID,
+      capture_id: this.activeCaptureID,
       injected_paths: [...this.injectedPaths].sort(),
     });
   }

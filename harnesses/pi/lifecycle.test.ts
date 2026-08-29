@@ -78,7 +78,7 @@ class FakeClient implements CaptureClient {
     this.maybeFail("record");
     this.calls.push({ method: "record", captureID, path });
     if (!this.blockWrites) return;
-    await new Promise<void>((resolvePromise, rejectPromise) => {
+    await new Promise<void>((_resolve, rejectPromise) => {
       if (signal?.aborted) return rejectPromise(new Error("cancelled"));
       signal?.addEventListener("abort", () => rejectPromise(new Error("cancelled")), { once: true });
     });

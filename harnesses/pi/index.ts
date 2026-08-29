@@ -49,10 +49,6 @@ export function registerMadeleine(pi: ExtensionAPI, client: MadeleineClient = ne
     return enabled;
   };
 
-  pi.on("session_start", async (_event, ctx) => {
-    await ready(ctx);
-  });
-
   const lifecycle = new CaptureLifecycle(client, state, ready);
 
   pi.on("tool_result", async (event, ctx) => {

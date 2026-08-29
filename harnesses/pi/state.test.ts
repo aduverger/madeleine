@@ -29,7 +29,7 @@ function harness(sessionFile?: string, initialEntries: CustomEntry[] = []) {
       getBranch: () => entries,
     },
   } as unknown as ExtensionContext;
-  return { pi, ctx, entries, setLeaf: (id: string | null) => (leaf = id) };
+  return { pi, ctx, entries };
 }
 
 function entry(id: string, data: unknown): CustomEntry {

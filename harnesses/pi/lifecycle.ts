@@ -41,15 +41,15 @@ export class CaptureLifecycle {
   private conversation: ConversationIdentity | undefined;
   private captureID: string | undefined;
   private workController = new AbortController();
-  private readonly lastPersistedWrite = new Map<string, number>();
-  private readonly writesInFlight = new Set<string>();
-  private readonly notifications = new Set<string>();
+  private readonly lastPersistedWriteAtByPath = new Map<string, number>();
+  private readonly writePathsInFlight = new Set<string>();
+  private readonly sentNotifications = new Set<string>();
 
   constructor(
     private readonly client: CaptureClient,
     private readonly state: PiState,
-    private readonly ready: (ctx: ExtensionContext) => Promise<boolean>,
-    private readonly now: () => number = () => performance.now(),
+    private readonly ensureReady: (ctx: ExtensionContext) => Promise<boolean>,
+    private readonly monotonicNow: () => number = () => performance.now(),
   ) {}
 
   register(pi: ExtensionAPI): void {
@@ -69,13 +69,13 @@ export class CaptureLifecycle {
   }
 
   private async start(event: SessionStartEvent, ctx: ExtensionContext): Promise<void> {
-    if (!(await this.ready(ctx))) return;
+    if (!(await this.ensureReady(ctx))) return;
 
     this.repositoryRoot = ctx.cwd;
     this.conversation = this.state.initialize(ctx, event.reason);
     this.captureID = undefined;
-    this.lastPersistedWrite.clear();
-    this.writesInFlight.clear();
+    this.lastPersistedWriteAtByPath.clear();
+    this.writePathsInFlight.clear();
     this.workController.abort();
     this.workController = new AbortController();
 
@@ -181,23 +181,23 @@ export class CaptureLifecycle {
       return;
     }
 
-    const now = this.now();
-    const lastPersisted = this.lastPersistedWrite.get(path);
+    const now = this.monotonicNow();
+    const lastPersistedAt = this.lastPersistedWriteAtByPath.get(path);
     if (
-      this.writesInFlight.has(path) ||
-      (lastPersisted !== undefined && now - lastPersisted < writeRefreshIntervalMs)
+      this.writePathsInFlight.has(path) ||
+      (lastPersistedAt !== undefined && now - lastPersistedAt < writeRefreshIntervalMs)
     ) {
       return;
     }
 
-    this.writesInFlight.add(path);
+    this.writePathsInFlight.add(path);
     try {
       await this.client.recordWrite(this.captureID, path, this.workController.signal);
-      this.lastPersistedWrite.set(path, this.now());
+      this.lastPersistedWriteAtByPath.set(path, this.monotonicNow());
     } catch {
       this.notifyOnce(ctx, "record-write", "Madeleine could not record a file write.");
     } finally {
-      this.writesInFlight.delete(path);
+      this.writePathsInFlight.delete(path);
     }
   }
 
@@ -215,8 +215,8 @@ export class CaptureLifecycle {
   }
 
   private notifyOnce(ctx: ExtensionContext, key: string, message: string): void {
-    if (!ctx.hasUI || this.notifications.has(key)) return;
-    this.notifications.add(key);
+    if (!ctx.hasUI || this.sentNotifications.has(key)) return;
+    this.sentNotifications.add(key);
     ctx.ui.notify(message, "warning");
   }
 }
