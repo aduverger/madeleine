@@ -49,7 +49,7 @@ func decodeRequest(input io.Reader) (json.RawMessage, *boundaryError) {
 	return *request.Params, nil
 }
 
-func WriteSuccess(output io.Writer, result any) error {
+func WriteSuccessResponse(output io.Writer, result any) error {
 	return encodeResponse(output, successResponse(result))
 }
 

@@ -22,7 +22,7 @@ func Main(build BuildInfo) int {
 		os.Stdin,
 		os.Stdout,
 		os.Stderr,
-		os.Getenv,
+		os.Getenv("MADELEINE_HOME"),
 		currentBuildInfo(build.Version, build.Commit),
 	)
 }
@@ -32,14 +32,13 @@ func run(
 	args []string,
 	input io.Reader,
 	output, diagnostics io.Writer,
-	getenv func(string) string,
+	home string,
 	build BuildInfo,
 ) int {
 	if len(args) == 0 {
 		return invalidInvocation(diagnostics, "command is required")
 	}
 
-	home := getenv("MADELEINE_HOME")
 	switch args[0] {
 	case "version":
 		if len(args) != 1 {
@@ -50,7 +49,7 @@ func run(
 		if len(args) != 2 {
 			return invalidInvocation(diagnostics, "rpc requires exactly one method")
 		}
-		outcome := rpc.Run(ctx, args[1], input, output, diagnostics, rpc.Config{Home: home})
+		outcome := rpc.Run(ctx, args[1], input, output, diagnostics, home)
 		return rpcExitCode(outcome)
 	case "doctor":
 		return runDoctor(ctx, args[1:], output, diagnostics, home, build)

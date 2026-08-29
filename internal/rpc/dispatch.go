@@ -9,11 +9,7 @@ import (
 	"github.com/aduverger/madeleine/internal/madeleine"
 )
 
-type Config struct {
-	Home string
-}
-
-func Run(ctx context.Context, method string, input io.Reader, output, diagnostics io.Writer, config Config) Outcome {
+func Run(ctx context.Context, method string, input io.Reader, output, diagnostics io.Writer, home string) Outcome {
 	params, requestError := decodeRequest(input)
 	if requestError != nil {
 		return writeBoundaryResponse(output, diagnostics, requestError)
@@ -24,7 +20,7 @@ func Run(ctx context.Context, method string, input io.Reader, output, diagnostic
 		return writeBoundaryResponse(output, diagnostics, unknownMethod(method))
 	}
 
-	service, err := madeleine.Open(ctx, madeleine.Options{Home: config.Home})
+	service, err := madeleine.Open(ctx, madeleine.Options{Home: home})
 	if err != nil {
 		return writeBoundaryResponse(output, diagnostics, mapOperationError(err))
 	}

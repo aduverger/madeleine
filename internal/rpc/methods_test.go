@@ -128,9 +128,9 @@ func callRPC(t *testing.T, ctx context.Context, home, method string, params any)
 	}
 
 	var output, diagnostics bytes.Buffer
-	status := Run(ctx, method, bytes.NewReader(request), &output, &diagnostics, Config{Home: home})
-	if status != OutcomeSuccess {
-		t.Fatalf("%s status = %d, stdout = %q, stderr = %q", method, status, output.String(), diagnostics.String())
+	outcome := Run(ctx, method, bytes.NewReader(request), &output, &diagnostics, home)
+	if outcome != OutcomeSuccess {
+		t.Fatalf("%s outcome = %d, stdout = %q, stderr = %q", method, outcome, output.String(), diagnostics.String())
 	}
 	if diagnostics.Len() != 0 {
 		t.Fatalf("%s stderr = %q, want empty", method, diagnostics.String())

@@ -34,7 +34,7 @@ func TestMain(m *testing.M) {
 
 func TestRunExitStatusesAndStreams(t *testing.T) {
 	build := BuildInfo{Version: "0.1.0", Commit: "unknown"}
-	getenv := func(string) string { return t.TempDir() }
+	home := t.TempDir()
 
 	tests := []struct {
 		name       string
@@ -70,7 +70,7 @@ func TestRunExitStatusesAndStreams(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			status := run(context.Background(), test.args, strings.NewReader(test.input),
-				&stdout, &stderr, getenv, build)
+				&stdout, &stderr, home, build)
 			if status != test.wantStatus {
 				t.Fatalf("status = %d, want %d", status, test.wantStatus)
 			}

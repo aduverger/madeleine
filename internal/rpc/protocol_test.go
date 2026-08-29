@@ -69,9 +69,9 @@ func TestRunRejectsInvalidProtocolInput(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var output, diagnostics bytes.Buffer
-			status := Run(context.Background(), "capture.get", strings.NewReader(test.input), &output, &diagnostics, Config{})
-			if status != OutcomeInvalidRequest {
-				t.Fatalf("outcome = %d, want %d", status, OutcomeInvalidRequest)
+			outcome := Run(context.Background(), "capture.get", strings.NewReader(test.input), &output, &diagnostics, "")
+			if outcome != OutcomeInvalidRequest {
+				t.Fatalf("outcome = %d, want %d", outcome, OutcomeInvalidRequest)
 			}
 			if diagnostics.Len() != 0 {
 				t.Fatalf("stderr = %q, want empty", diagnostics.String())
@@ -83,14 +83,14 @@ func TestRunRejectsInvalidProtocolInput(t *testing.T) {
 	}
 }
 
-func TestRunRejectsUnknownMethodAndInvalidParams(t *testing.T) {
+func TestRunMethodValidation(t *testing.T) {
 	request := `{"protocol_version":1,"params":{}}`
 
 	t.Run("unknown method", func(t *testing.T) {
 		var output, diagnostics bytes.Buffer
-		status := Run(context.Background(), "missing", strings.NewReader(request), &output, &diagnostics, Config{})
-		if status != OutcomeInvalidRequest || !strings.Contains(output.String(), `"code":"unknown_method"`) {
-			t.Fatalf("status = %d, stdout = %q", status, output.String())
+		outcome := Run(context.Background(), "missing", strings.NewReader(request), &output, &diagnostics, "")
+		if outcome != OutcomeInvalidRequest || !strings.Contains(output.String(), `"code":"unknown_method"`) {
+			t.Fatalf("outcome = %d, stdout = %q", outcome, output.String())
 		}
 		if diagnostics.Len() != 0 {
 			t.Fatalf("stderr = %q, want empty", diagnostics.String())
@@ -99,11 +99,11 @@ func TestRunRejectsUnknownMethodAndInvalidParams(t *testing.T) {
 
 	t.Run("invalid params", func(t *testing.T) {
 		var output, diagnostics bytes.Buffer
-		status := Run(context.Background(), "capture.get", strings.NewReader(
+		outcome := Run(context.Background(), "capture.get", strings.NewReader(
 			`{"protocol_version":1,"params":[]}`,
-		), &output, &diagnostics, Config{Home: t.TempDir()})
-		if status != OutcomeInvalidRequest || !strings.Contains(output.String(), `"code":"invalid_request"`) {
-			t.Fatalf("status = %d, stdout = %q", status, output.String())
+		), &output, &diagnostics, t.TempDir())
+		if outcome != OutcomeInvalidRequest || !strings.Contains(output.String(), `"code":"invalid_request"`) {
+			t.Fatalf("outcome = %d, stdout = %q", outcome, output.String())
 		}
 		if diagnostics.Len() != 0 {
 			t.Fatalf("stderr = %q, want empty", diagnostics.String())
@@ -112,11 +112,11 @@ func TestRunRejectsUnknownMethodAndInvalidParams(t *testing.T) {
 
 	t.Run("unknown fields", func(t *testing.T) {
 		var output, diagnostics bytes.Buffer
-		status := Run(context.Background(), "capture.get", strings.NewReader(
+		outcome := Run(context.Background(), "capture.get", strings.NewReader(
 			`{"protocol_version":1,"params":{"capture_id":"missing","extra":true},"extra":true}`,
-		), &output, &diagnostics, Config{Home: t.TempDir()})
-		if status != OutcomeOperationFailure || !strings.Contains(output.String(), `"code":"not_found"`) {
-			t.Fatalf("status = %d, stdout = %q", status, output.String())
+		), &output, &diagnostics, t.TempDir())
+		if outcome != OutcomeOperationFailure || !strings.Contains(output.String(), `"code":"not_found"`) {
+			t.Fatalf("outcome = %d, stdout = %q", outcome, output.String())
 		}
 		if diagnostics.Len() != 0 {
 			t.Fatalf("stderr = %q, want empty", diagnostics.String())

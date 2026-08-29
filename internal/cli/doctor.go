@@ -58,7 +58,7 @@ func executeDoctor(
 
 	var outputError error
 	if jsonOutput {
-		outputError = rpc.WriteSuccess(output, DoctorResult{Checks: checks})
+		outputError = rpc.WriteSuccessResponse(output, DoctorResult{Checks: checks})
 	} else {
 		outputError = writeHumanChecks(output, checks)
 	}
@@ -131,7 +131,7 @@ func checkRepository(ctx context.Context, service *madeleine.Service, repository
 		return check
 	}
 	if _, err := service.ResolveRepository(ctx, repositoryPath); err != nil {
-		check.Detail = rpc.SafeMessage(err)
+		check.Detail = rpc.OperationErrorMessage(err)
 		return check
 	}
 	check.OK = true

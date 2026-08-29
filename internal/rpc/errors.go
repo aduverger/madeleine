@@ -51,7 +51,7 @@ func unknownMethod(method string) *boundaryError {
 	return &boundaryError{code: codeUnknownMethod, message: message, outcome: OutcomeInvalidRequest}
 }
 
-func SafeMessage(err error) string {
+func OperationErrorMessage(err error) string {
 	return mapOperationError(err).message
 }
 
