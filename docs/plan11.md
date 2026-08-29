@@ -1,199 +1,235 @@
-# Plan 11: Recovery, end-to-end hardening, and Pi MVP
+# Plan 11: Persisted bounded transcripts and evidence retrieval
 
 PR scope: one PR  
 Depends on: `plan10.md`  
-Design decisions: D-006, D-014, D-015, D-016, D-019, D-020, D-021, D-023, D-024
+Design decisions: D-003, D-004, D-006, D-016, D-017, D-021, D-022, D-023, D-025
 
 ## Goal
 
-Finish the Pi MVP by retrying sealed pending Captures, validating crash
-reattachment and the real Go/SQLite/TypeScript vertical slice, and documenting
-installation and operations. Recovery must not delay or contaminate current
-work.
+Make the evidence behind an Episode durable and agent-accessible. At Capture
+sealing, Pi must submit a cursor-bounded, sanitized transcript to Madeleine;
+Madeleine persists it under a generated Transcript ID, uses its compact view for
+L1/L2 generation, and exposes both `compact` and `raw` views without depending
+on the original Pi session file.
 
 ## Entire reuse gate
 
-- [ ] Inspect the relevant `entireio/cli` implementation and tests before
-  coding this PR.
-- [ ] Prefer copying or adapting compatible mechanics to reimplementation;
-  Madeleine's interfaces and invariants remain authoritative.
-- [ ] Record reused upstream paths and commit, and retain required attribution.
-- [ ] If equivalent code is not reused, record the concrete mismatch in the PR.
+- [ ] Inspect relevant `entireio/cli` transcript compaction, storage, pagination,
+  and retrieval implementations and tests before coding.
+- [ ] Adapt compatible mechanics rather than rebuilding them, while preserving
+  Madeleine's cursor boundaries and structured-mutation policy.
+- [ ] Record upstream paths and commit, and retain required attribution.
+- [ ] Record concrete semantic mismatches for mechanics that are not reused.
 
 ## Files
 
 ```text
-harnesses/pi/recovery.ts
+internal/store/migrations/*.sql
+internal/store/transcript.go
+internal/store/records.go
+internal/madeleine/capture.go
+internal/madeleine/episode.go
+internal/madeleine/transcript.go
+internal/madeleine/types.go
+internal/rpc/methods.go
+harnesses/pi/transcript.ts
+harnesses/pi/summary.ts
 harnesses/pi/lifecycle.ts
-harnesses/pi/commands.ts
+harnesses/pi/rpc.ts
+harnesses/pi/episode-tool.ts
+harnesses/pi/transcript-tool.ts
 harnesses/pi/*.test.ts
-test/e2e/*
+docs/design.md
+docs/plan11.md
+docs/plan12.md
 README.md
 ```
 
-## Startup behavior
+## Domain and schema
 
-Plan 9 already establishes the open-Capture policy:
-
-1. Resolve the current Repository and Conversation.
-2. Restore and validate persisted Pi state when available.
-3. Reattach the Conversation's single open Capture after reload or abrupt
-   process exit.
-4. Start a new Capture only when that Conversation has no open Capture.
-5. Start background retry for older `pending_summary` Captures.
-
-- [ ] Verify this policy with the real binary and persisted Pi entries.
-- [ ] Never inherit Capture state into a new or forked Conversation.
-- [ ] Treat multiple open Captures for one Conversation as invalid storage and
-  disable write capture rather than choosing one arbitrarily.
-- [ ] Do not infer or attach filesystem changes made while Pi was stopped.
-- [ ] Empty open Captures remain open when reattached and are abandoned only
-  when a later clean seal or rollover confirms that they have no structured
-  paths.
-
-## Background pending-summary worker
-
-- [ ] Maintain one worker per extension runtime and one active summary model
-  call at a time.
-- [ ] Snapshot `pending_summary` Captures for the current Conversation
-  oldest-first after the current open Capture is attached or started.
-- [ ] Attempt each queued Capture at most once during that runtime.
-- [ ] Reuse Plan 10's projection, model, validation, and publication functions;
-  add no second recovery implementation.
-- [ ] Continue after a per-Capture validation or publication failure while
-  reporting one concise notification.
-- [ ] Associate an AbortController with the worker.
-- [ ] On session shutdown, abort and await worker cleanup before finalizing the
-  current Capture. An aborted old Capture remains pending.
-- [ ] Never append recovery prompts or results to the active Conversation.
-
-## Recovery invariants
-
-- [ ] Restart reattachment preserves the original Capture ID, start cursor,
-  recorded paths, and injected-path deduplication state.
-- [ ] A clean shutdown or manual rollover freezes the old Capture before a new
-  Capture starts.
-- [ ] Recording current writes cannot update a sealed pending Capture.
-- [ ] Publishing an old pending Capture cannot change the current open Capture's
-  status or raw paths.
-- [ ] Pending-summary retry never blocks path recording for the current Capture.
-- [ ] Repeated crashes leave one open Capture and independently recoverable
-  sealed Captures for the Conversation.
-
-## End-to-end harness
-
-Build a test harness using:
-
-- the real compiled `madeleine` binary;
-- a real temporary SQLite home;
-- real temporary Git repositories for Repository identity only;
-- a fake Pi `ExtensionAPI`, session manager, and deterministic model registry.
-
-Cover:
-
-- [ ] Work interval A edits two files, quits, publishes one Episode, and work
-  interval B reads one path and receives A's L1.
-- [ ] B calls `madeleine_episode` and receives A's L2.
-- [ ] `/reload` during A retains the Capture and injects each path once.
-- [ ] Hard crash after a write reattaches A and preserves its original boundary
-  and paths.
-- [ ] `/madeleine rollover` publishes or leaves A pending, then starts B in the
-  same Conversation.
-- [ ] B writes while an older pending summary retries; the Captures retain
-  disjoint structured path sets.
-- [ ] Summary failure followed by restart succeeds on automatic retry.
-- [ ] Multiple pending Captures recover oldest-first with one model call active.
-- [ ] Empty interval and structured edit/write behavior.
-- [ ] Shell-only, generated, formatted, human, and other-session changes are not
-  attributed without a successful structured mutation event.
-- [ ] Missing binary, wrong protocol, SQLite busy, repository-discovery failure,
-  missing model, malformed summary, and forced process termination all fail
-  open.
-
-## Concurrency verification
-
-- [ ] Add a Go integration test with concurrent exact-path Episode readers,
-  Capture path writers, and Episode publishers against one WAL database.
-- [ ] Assert no lost writes and no unexpected `SQLITE_BUSY` after bounded retry/
-  timeout handling.
-- [ ] Record benchmark helpers for 1, 10, 100, and 500 simulated agents, but do
-  not make speculative performance thresholds release blockers.
-- [ ] Document measured lookup/publication latency and busy count from a local
-  representative run in the PR description, not as committed product claims.
-
-## README and operations
-
-- [ ] Replace the placeholder README with a concise explanation of the north
-  star, Capture/Episode lifecycle, Pi MVP behavior, and trust/privacy model.
-- [ ] Document development installation:
+Introduce `Transcript` as a generated, repository-owned evidence record rather
+than another lifecycle unit.
 
 ```text
-go install github.com/aduverger/madeleine/cmd/madeleine@main
-pi install npm:@aduverger/madeleine-pi@0.1.0
+Capture --0..1--> Transcript <--1-- Episode
+Transcript --1..n--> TranscriptEntry
 ```
 
-- [ ] Document release installation using `@v0.1.0`, noting that the tag is
-  created after merge rather than by this PR.
-- [ ] Document `MADELEINE_HOME`, `MADELEINE_BIN`, database locations,
-  `madeleine doctor`, and all `/madeleine` commands including `rollover`.
-- [ ] Explain what is stored: intentionally mutated paths, summaries,
-  timestamps, and transcript references; transcript bodies remain
-  harness-owned.
-- [ ] Explain crash reattachment, pending-summary retry, explicit
-  retry/rollover/abandon, and how to disable or remove the Pi package.
-- [ ] State clearly that opaque shell and filesystem changes are not attributed
-  in v0.1.
-- [ ] Link `design.md` and the completed plan files.
-- [ ] Keep future features clearly labeled rather than promising them in v0.1.
+- [ ] Generate a UUIDv7 Transcript ID when a non-empty Capture is first sealed.
+- [ ] Add `transcripts` with Capture, Repository, Conversation, harness, format
+  version, source start/end cursors, nullable-until-prepared compact text,
+  timestamps, and a unique Capture relationship.
+- [ ] Add `transcript_entries` keyed by `(transcript_id, position)` with a stable
+  entry kind and versioned JSON content.
+- [ ] Add `transcript_id` to Captures and Episodes; Episode publication copies
+  the sealed Capture's Transcript ID.
+- [ ] Remove `transcript_ref` from Conversations, Captures, Episodes, RPC types,
+  renderers, and migrations. The application has never shipped, so edit the
+  original migrations and add no compatibility migration or dual-read path.
+- [ ] Keep start/end cursors on an open or pending Capture and on its Transcript
+  as opaque source-boundary metadata. Episode APIs expose the Transcript ID,
+  not a harness file path.
+- [ ] Use Pi's persisted session UUID (`getSessionId()`), not its session-file
+  path, as the external Conversation ID. Ephemeral sessions retain a generated
+  runtime UUID.
+- [ ] Delete Capture raw paths after Episode publication as before; retain the
+  immutable Transcript and its entries with the Episode.
 
-## Final CI and smoke tests
+## Canonical bounded transcript
 
-- [ ] Run `make check` and `npm run check` on Linux and macOS.
-- [ ] Verify `go install` from a clean module cache.
-- [ ] Verify `pi install` package discovery from a clean temporary Pi home.
-- [ ] Manually run Pi against a disposable Git repository through edit,
-  rollover, shutdown, read-context, L2 lookup, reload, and crash/resume
-  scenarios.
-- [ ] Run `git diff --check` and confirm no generated DB, npm cache, binary, or
-  test repository is tracked.
-- [ ] Mark checkboxes in `plan1.md` through `plan11.md` only for work actually
-  merged in the stack.
+The Pi adapter owns Pi entry interpretation. It walks the end-to-start parent
+chain and submits only entries after the Capture start cursor through the end
+cursor.
+
+- [ ] Define a versioned structured-entry payload shared by sealing, retry,
+  summary, and retrieval.
+- [ ] Store chronological user text, assistant text, branch summaries, and
+  structured `edit`/`write` calls and results with success/failure.
+- [ ] Exclude Pi `compaction` entries. Pi retains the original messages, and a
+  compaction may summarize ancestors outside the Capture boundary.
+- [ ] Exclude read outputs, image/audio bodies, thinking, custom state,
+  unrelated tool-result bulk, and complete Madeleine-context blocks.
+- [ ] Preserve entry kinds and mutation inputs as structured JSON rather than
+  storing only one rendered prompt string.
+- [ ] Apply named per-entry and total stored-transcript limits. Reject an
+  oversized transcript before sealing rather than silently claiming complete
+  raw evidence.
+- [ ] Mark both views as untrusted historical data at every model and tool
+  boundary.
+
+## Raw and compact views
+
+The names describe two representations of the same bounded Madeleine
+transcript; they are not new L3/L4 summary levels.
+
+### Raw
+
+- [ ] Return the canonical chronological entries without Pi compaction entries.
+- [ ] Preserve more text than the compact view while retaining the explicit
+  exclusions and storage limits above.
+- [ ] Page by stable entry position with a bounded page size and `next_offset`.
+- [ ] Never read the original Pi JSONL file during retrieval.
+
+### Compact
+
+- [ ] Deterministically render the canonical entries using Plan 10's projection
+  policy and named prompt limits.
+- [ ] Preserve the first user goal, branch summaries, authoritative structured
+  paths, and latest relevant entries when truncation is necessary.
+- [ ] Persist the exact compact text passed to the L1/L2 model so later evidence
+  retrieval shows what the summarizer saw.
+- [ ] Return compact text in one bounded response.
+
+## Atomic sealing and recovery
+
+- [ ] Extend `capture.seal` to accept the versioned bounded structured entries;
+  compact text is prepared only after sealing returns authoritative paths.
+- [ ] In one SQLite transaction, validate the open Capture, determine whether it
+  has paths, insert its Transcript and entries when non-empty, set end boundary
+  and `transcript_id`, and transition to `pending_summary` or `abandoned`.
+- [ ] Discard the submitted transcript for an empty Capture.
+- [ ] Make identical seal retries idempotent. Reject a different transcript for
+  an already-sealed Capture as a conflict.
+- [ ] Return `transcript_id`, paths, and status in `FinalizationDraft`.
+- [ ] Add an idempotent `transcript.prepare_compact` operation that sets compact
+  text once. An identical retry succeeds; different text conflicts.
+- [ ] After sealing, render compact text from the persisted structured entries
+  and returned authoritative paths, persist it, then generate L1/L2 from that
+  exact stored text.
+- [ ] Explicit and background retries load compact text by Transcript ID. If a
+  crash left it unset, reconstruct it from persisted entries and Capture paths,
+  then set it through the same operation. Neither path reads the Pi session file.
+- [ ] If projection or atomic sealing fails, keep the Capture open. If summary or
+  publication fails after sealing, keep the Capture and Transcript pending.
+
+## Retrieval API and Pi tool
+
+- [ ] Add repository-scoped `transcript.get` with Transcript ID, view, and raw
+  page offset parameters.
+- [ ] Verify the Transcript belongs to the resolved Repository before returning
+  any content.
+- [ ] Return compact text or a page of typed raw entries plus `next_offset`.
+- [ ] Include `transcript_id` in Episode detail and remove transcript reference
+  and cursor presentation from `madeleine_episode`.
+- [ ] Add `madeleine_transcript { transcript_id, view, offset? }`.
+- [ ] Keep `view` strict to `compact | raw`; default to `compact` only if the
+  TypeBox schema can express that without compatibility ambiguity.
+- [ ] Use Pi's standard tool-output truncation as a final safety bound. Raw
+  pagination must normally keep each response below that limit.
+- [ ] Return repository-safe errors without leaking database paths or another
+  Repository's Transcript existence.
+
+## Summary integration
+
+- [ ] Keep Plan 10's strict L1/L2 JSON contract and active-model call unchanged.
+- [ ] Feed the persisted compact view to the model exactly once per attempt.
+- [ ] Include authoritative Capture paths returned by sealing in compact text
+  before preparing the Transcript for summary.
+- [ ] Do not store prompt instructions, model identity, raw model response, or
+  hidden reasoning in Transcript records.
+- [ ] Treat an existing identical Episode publication as success.
+
+## Tests
+
+- [ ] Schema has Transcript ownership and no `transcript_ref` columns.
+- [ ] Pi session UUID Conversation identity survives reload and resume without a
+  session-file path.
+- [ ] Linear and forked cursor ranges persist only the selected Capture interval.
+- [ ] Raw view excludes compaction entries but retains original messages across
+  a compaction.
+- [ ] Branch summaries are retained without traversing abandoned raw branches.
+- [ ] Read output, binary content, custom state, thinking, and recursive
+  Madeleine context are excluded.
+- [ ] Atomic seal success, empty abandonment, identical retry, conflicting
+  retry, oversized transcript, and transaction rollback.
+- [ ] Crash between sealing and compact preparation recovers from persisted
+  entries and paths without the Pi session file.
+- [ ] Summary input exactly equals persisted compact text.
+- [ ] Summary and publish failures leave Transcript-linked pending Captures.
+- [ ] Retry succeeds after deleting or moving the original Pi session file.
+- [ ] Compact retrieval, multi-page raw retrieval, invalid offset/view, missing
+  Transcript, and cross-Repository denial.
+- [ ] `madeleine_episode` exposes Transcript ID and
+  `madeleine_transcript` renders both untrusted views within Pi output bounds.
+
+## Acceptance criteria
+
+- [ ] Every published Episode references one immutable bounded Transcript.
+- [ ] The agent can retrieve compact evidence and page through raw evidence for
+  an Episode without accessing a Pi session file.
+- [ ] The compact evidence is byte-for-byte the source used for L1/L2.
+- [ ] No Pi compaction summary can introduce pre-Capture Conversation content.
+- [ ] A summary failure preserves all data required for retry in SQLite.
+- [ ] No database or public RPC response stores or exposes a transcript file
+  path.
+
+## Excluded from this PR
+
+Importing old external transcripts, storing image/audio payloads, full read-tool
+outputs, semantic transcript search, transcript mutation, transcript deletion
+UI, cross-repository retrieval, other harness adapters, and generated L3/L4
+summaries.
 
 ## Plan revisions and decision ledger
 
 Listed least-confident first:
 
-1. The background worker may publish older pending Episodes while the current
-   Capture records writes. SQLite WAL and Capture-owned rows make this safe, but
-   the end-to-end suite must prove that summary retry does not create write
-   starvation.
-2. A crash no longer creates a second Capture. Reattaching the same open Capture
-   preserves the intended coarse Episode boundary now that downtime filesystem
-   changes cannot enter through Git reconciliation.
-3. Git remains in the end-to-end harness only because Repository identity is
-   Git-based. Dirty-start, staged, commit, and branch-switch attribution tests
-   were removed because v0.1 deliberately ignores those unstructured changes.
-4. Manual rollover is the explicit way to create multiple Episodes inside one
-   long-running Conversation. It shares finalization with shutdown rather than
-   introducing a second publication path.
-
-## MVP acceptance criteria
-
-- [ ] The complete clean-interval, rollover, read-context, and L2 flow works
-  with real Pi.
-- [ ] Crash/resume reattaches one open Capture and preserves its structured paths
-  without blocking startup.
-- [ ] Pending summaries retry automatically without interfering with the current
-  Capture.
-- [ ] All failures preserve Pi behavior and recoverable data.
-- [ ] Exact-path retrieval remains deterministic and contains no semantic
-  search/ranking or inferred filesystem attribution layer.
-- [ ] The application, CLI, schema, Pi package, installation, and recovery
-  behavior agree with `design.md`.
-- [ ] The repository is ready for a post-merge `v0.1.0` tag.
-
-## Excluded from this PR and v0.1
-
-Other harnesses, transcript backfill, Git/filesystem reconciliation, Agent Trace,
-MCP server, folder/symbol/rename memory, copied transcripts, multiplayer UI,
-daemon, Postgres, network sync, embeddings, and semantic ranking.
+1. "Raw" means the fullest persisted Madeleine evidence view, not a byte copy of
+   Pi's JSONL. It deliberately excludes bulk and privileged/internal content
+   that is not useful file-intent evidence. This interpretation keeps the new
+   storage aligned with Madeleine's retrieval purpose and the user's request to
+   persist the bounded transcript used by summarization.
+2. Compact text is stored in addition to structured entries. It is derivable,
+   but persisting it proves exactly what the summary model saw and prevents a
+   later renderer change from rewriting an Episode's evidence.
+3. Structured Transcript insertion is part of `capture.seal`, rather than a
+   separate `transcript.put` followed by sealing. This avoids a crash window
+   containing a sealed Capture whose only evidence still lives in a harness
+   file. Compact text is set afterward because only sealing returns the frozen
+   authoritative paths; a crash in between is recoverable from SQLite.
+4. Pi compaction summaries are excluded from both views. The append-only raw
+   messages remain available, while the summary's semantic start boundary is
+   not reliably limited to the Capture start cursor.
+5. The existing recovery/MVP plan was moved from Plan 11 to Plan 12 so final
+   end-to-end hardening validates persisted evidence rather than immediately
+   obsolete transcript references.

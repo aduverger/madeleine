@@ -68,6 +68,24 @@ export interface FinalizationDraft {
   episode_id?: string;
 }
 
+export interface Episode {
+  id: string;
+  capture_id: string;
+  repository_id: string;
+  conversation_id: string;
+  conversation_key: { harness: string; external_id: string };
+  harness: string;
+  paths: string[];
+  l1: string;
+  l2: string;
+  transcript_ref?: string;
+  start_cursor: string;
+  end_cursor: string;
+  started_at: string;
+  ended_at: string;
+  created_at: string;
+}
+
 export interface EpisodeDetail {
   episode_id: string;
   harness: string;
@@ -201,6 +219,20 @@ export class RPCClient {
       "capture.seal",
       { capture_id: captureID, end_cursor: endCursor },
       validateFinalizationDraft,
+      signal,
+    );
+  }
+
+  async publishEpisode(
+    captureID: string,
+    l1: string,
+    l2: string,
+    signal?: AbortSignal,
+  ): Promise<Episode> {
+    return this.call(
+      "episode.publish",
+      { capture_id: captureID, l1, l2 },
+      validateEpisode,
       signal,
     );
   }
@@ -426,6 +458,30 @@ function isConversationKey(value: unknown): boolean {
 
 function isCaptureStatus(value: unknown): value is CaptureStatus {
   return ["open", "pending_summary", "finalized", "abandoned"].includes(value as string);
+}
+
+function validateEpisode(value: unknown): Episode {
+  if (
+    !isObject(value) ||
+    typeof value.id !== "string" ||
+    typeof value.capture_id !== "string" ||
+    typeof value.repository_id !== "string" ||
+    typeof value.conversation_id !== "string" ||
+    !isConversationKey(value.conversation_key) ||
+    typeof value.harness !== "string" ||
+    !isStringArray(value.paths) ||
+    typeof value.l1 !== "string" ||
+    typeof value.l2 !== "string" ||
+    (value.transcript_ref !== undefined && typeof value.transcript_ref !== "string") ||
+    typeof value.start_cursor !== "string" ||
+    typeof value.end_cursor !== "string" ||
+    typeof value.started_at !== "string" ||
+    typeof value.ended_at !== "string" ||
+    typeof value.created_at !== "string"
+  ) {
+    throw invalidResult();
+  }
+  return value as unknown as Episode;
 }
 
 function validateEpisodeDetail(value: unknown): EpisodeDetail {

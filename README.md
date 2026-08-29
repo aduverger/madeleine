@@ -43,19 +43,21 @@ memory database.
 
 ## Simple primitives
 
-Madeleine uses three domain objects:
+Madeleine uses four product-domain objects:
 
 - **Conversation** — a harness-owned thread, such as a Pi session.
 - **Capture** — durable operational state for one unfinished interval of work.
 - **Episode** — an immutable historical record produced from a finalized
   Capture.
+- **Transcript** — immutable sanitized evidence for one non-empty sealed
+  Capture, addressed by a generated ID.
 
 Their responsibilities remain separate:
 
 | Unfinished Capture | Published Episode |
 |---|---|
 | Records what is happening now | Explains what happened and why |
-| Stores modified paths and activity timestamps | Stores exact paths and L1/L2 summaries |
+| Stores modified paths and activity timestamps | Stores exact paths, L1/L2, and a Transcript ID |
 | Mutable while work is in progress | Immutable after publication |
 
 `live` and `history` are descriptions of lifecycle state, not additional domain
@@ -74,8 +76,12 @@ Episode context is disclosed in layers:
 1. **L1** — one or two sentences, attached automatically when a file is read.
 2. **L2** — a longer brief containing goals, decisions, rationale, actions,
    tests, and caveats; requested only when an Episode looks useful.
-3. **Raw transcript** — the original harness-owned conversation remains the
-   evidence source. Madeleine stores a reference rather than copying it.
+3. **Compact Transcript** — the exact bounded evidence used to generate L1/L2.
+4. **Raw Transcript** — the fuller sanitized, cursor-bounded structured entries,
+   available in pages.
+
+Madeleine persists both Transcript views by generated ID. It does not depend on
+or expose the original harness transcript-file path.
 
 The default lookup is intentionally deterministic: the five newest Episodes for
 the exact path, newest first. The model decides which history matters.
@@ -90,7 +96,9 @@ Capture stores successful structured file mutations
     ↓
 Capture is sealed on exit, session transition, or manual rollover
     ↓
-L1 and L2 are generated from the bounded conversation interval
+bounded compact/raw Transcript evidence is persisted
+    ↓
+L1 and L2 are generated from the persisted compact view
     ↓
 immutable Episode is published
 ```
@@ -108,7 +116,7 @@ It will provide:
 - local SQLite storage in WAL mode;
 - a thin Pi TypeScript extension;
 - automatic L1 context after successful file reads;
-- explicit L2 retrieval through a Pi tool;
+- explicit L2 and compact/raw Transcript retrieval through Pi tools;
 - immediate recording of successful `edit` and `write` operations;
 - deliberate Capture rollover within a long-running Pi session;
 - clean shutdown, hot-reload, and crash-reattachment semantics;
@@ -136,7 +144,7 @@ The MVP does **not** include:
 
 - embeddings, vector databases, semantic ranking, or global memory search;
 - function, symbol, range, folder, or rename-level identity;
-- copied transcript storage or bulk import of old agent histories;
+- unsanitized harness-file copies or bulk import of old agent histories;
 - multiplayer coordination or shared remote storage;
 - a daemon, web service, or user interface;
 - Agent Trace or Git AI interoperability;
@@ -165,7 +173,7 @@ operation would use a server store such as PostgreSQL.
 Likely next steps are:
 
 1. Add more harness adapters without changing the core model.
-2. Import historical sessions from existing harness transcripts.
+2. Import historical sessions into bounded Transcript records.
 3. Evaluate opt-in Git or filesystem attribution if structured mutation events
    miss context that agents demonstrably need.
 4. Derive folder history and follow Git renames when exact paths prove limiting.
@@ -179,7 +187,7 @@ Likely next steps are:
 
 - [`design.md`](./docs/design.md) contains the philosophy, accepted decisions,
   lifecycle, interfaces, MVP boundaries, and rejected alternatives.
-- [`plan1.md`](./docs/plan1.md) through [`plan11.md`](./docs/plan11.md) form the
+- [`plan1.md`](./docs/plan1.md) through [`plan12.md`](./docs/plan12.md) form the
   stacked implementation plan, with one reviewable pull request per file.
 
 ## License

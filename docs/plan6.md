@@ -197,7 +197,7 @@ Listed least-confident first:
    to pretend the application-only layout existed earlier.
 7. The unimplemented plan stack is renumbered rather than adding a `plan6a` or
    out-of-band migration document: Plan 6 is this migration, Plan 7 is the CLI,
-   and the Pi/MVP work continues through Plan 11.
+   and the Pi/MVP work continues through Plan 12.
 8. This layout follows the official Go module guidance for applications with
    `cmd` and private supporting packages, Go package-naming guidance to create
    meaningful boundaries, and the packages-as-layers rule that dependencies

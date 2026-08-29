@@ -3,10 +3,10 @@ import type {
   ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
 
-import type { RolloverResult } from "./lifecycle.ts";
+import type { RetryResult, RolloverResult } from "./lifecycle.ts";
 import type { Capture, DoctorCheck } from "./rpc.ts";
 
-const usage = "Usage: /madeleine status | rollover | abandon <capture-id> | doctor";
+const usage = "Usage: /madeleine status | rollover | retry [capture-id] | abandon <capture-id> | doctor";
 
 interface CommandClient {
   doctor(repositoryRoot: string): Promise<DoctorCheck[]>;
@@ -18,6 +18,7 @@ interface CaptureController {
   currentCaptureID(): string | undefined;
   clearCurrentCapture(captureID: string): void;
   rollover(ctx: ExtensionCommandContext): Promise<RolloverResult>;
+  retry(captureID: string | undefined, ctx: ExtensionCommandContext): Promise<RetryResult[]>;
 }
 
 export function registerCommands(
@@ -26,7 +27,7 @@ export function registerCommands(
   captureController: CaptureController,
 ): void {
   pi.registerCommand("madeleine", {
-    description: "Show status, roll over or abandon a Capture, or run doctor checks",
+    description: "Show status, finalize or retry Captures, abandon unfinished work, or run doctor checks",
     handler: async (argumentsText, ctx) => {
       const argumentsList = argumentsText.trim().split(/\s+/).filter(Boolean);
       switch (argumentsList[0]) {
@@ -36,6 +37,9 @@ export function registerCommands(
         case "rollover":
           if (argumentsList.length !== 1) return showUsage(ctx);
           return rollover(captureController, ctx);
+        case "retry":
+          if (argumentsList.length > 2) return showUsage(ctx);
+          return retry(captureController, argumentsList[1], ctx);
         case "abandon":
           if (argumentsList.length !== 2) return showUsage(ctx);
           return abandon(client, captureController, argumentsList[1]!, ctx);
@@ -77,12 +81,42 @@ async function rollover(
   try {
     await ctx.waitForIdle();
     const result = await captureController.rollover(ctx);
-    const outcome = result.sealed.empty
-      ? `Abandoned empty Capture ${result.sealed.capture_id}.`
-      : `Sealed Capture ${result.sealed.capture_id}; Episode publication is pending.`;
+    let outcome: string;
+    switch (result.finalization.status) {
+      case "abandoned":
+        outcome = `Abandoned empty Capture ${result.finalization.captureID}.`;
+        break;
+      case "published":
+        outcome = `Published Episode ${result.finalization.episodeID} from Capture ${result.finalization.captureID}.`;
+        break;
+      case "pending":
+        outcome = `Capture ${result.finalization.captureID} remains pending publication.`;
+        break;
+    }
     ctx.ui.notify(`${outcome}\nStarted Capture ${result.startedCaptureID}.`, "info");
   } catch {
     ctx.ui.notify("Madeleine could not roll over the current Capture.", "error");
+  }
+}
+
+async function retry(
+  captureController: CaptureController,
+  captureID: string | undefined,
+  ctx: ExtensionCommandContext,
+): Promise<void> {
+  try {
+    await ctx.waitForIdle();
+    const results = await captureController.retry(captureID, ctx);
+    if (results.length === 0) {
+      ctx.ui.notify("Madeleine has no pending Captures in this Conversation.", "info");
+      return;
+    }
+    const lines = results.map((result) => result.status === "published"
+      ? `${result.captureID}: published Episode ${result.episodeID}`
+      : `${result.captureID}: still pending`);
+    ctx.ui.notify(lines.join("\n"), results.some((result) => result.status === "failed") ? "warning" : "info");
+  } catch {
+    ctx.ui.notify("Madeleine could not retry the requested Capture.", "error");
   }
 }
 

@@ -9,7 +9,8 @@ Design decisions: D-004, D-005, D-006, D-007, D-011, D-014, D-016, D-021, D-023,
 Connect Pi lifecycle and successful mutation events to Captures. Preserve one
 Capture across `/reload` and abrupt process restart, start a new Capture after a
 clean boundary, and expose operational status, rollover, and abandon commands.
-Episode summarization starts in Plan 10.
+Episode summarization starts in Plan 10. Plan 11 replaces transcript-file
+references with generated IDs for persisted bounded Transcripts.
 
 ## Entire reuse gate
 
