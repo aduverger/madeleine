@@ -29,7 +29,10 @@ func (tx *Tx) FindOpenCaptureID(ctx context.Context, conversationID, openStatus 
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
-	return captureID, err == nil, err
+	if err != nil {
+		return "", false, err
+	}
+	return captureID, true, nil
 }
 
 func (tx *Tx) InsertCapture(ctx context.Context, record CaptureRecord, head string, headExists bool) error {
@@ -52,7 +55,10 @@ func (db *DB) GetCapture(ctx context.Context, captureID string) (CaptureRecord, 
 	if errors.Is(err, sql.ErrNoRows) {
 		return CaptureRecord{}, false, nil
 	}
-	return capture, err == nil, err
+	if err != nil {
+		return CaptureRecord{}, false, err
+	}
+	return capture, true, nil
 }
 
 func (tx *Tx) GetCapture(ctx context.Context, captureID string) (CaptureRecord, bool, error) {
@@ -60,7 +66,10 @@ func (tx *Tx) GetCapture(ctx context.Context, captureID string) (CaptureRecord, 
 	if errors.Is(err, sql.ErrNoRows) {
 		return CaptureRecord{}, false, nil
 	}
-	return capture, err == nil, err
+	if err != nil {
+		return CaptureRecord{}, false, err
+	}
+	return capture, true, nil
 }
 
 func (db *DB) ListPendingCaptures(

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 type testService struct {
@@ -50,5 +51,5 @@ func newTestGitRepository(t *testing.T, origin string) string {
 }
 
 func utcTimestamp() string {
-	return nowUTC().Format("2006-01-02T15:04:05.999999999Z07:00")
+	return nowUTC().Format(time.RFC3339Nano)
 }

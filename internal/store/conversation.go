@@ -16,7 +16,10 @@ func (tx *Tx) FindConversationID(ctx context.Context, repositoryID, harness, ext
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
-	return conversationID, err == nil, err
+	if err != nil {
+		return "", false, err
+	}
+	return conversationID, true, nil
 }
 
 func (tx *Tx) InsertConversation(

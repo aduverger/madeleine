@@ -2,7 +2,6 @@ package madeleine
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/aduverger/madeleine/internal/repopath"
 )
@@ -79,11 +78,6 @@ func (s *Service) GetEpisode(ctx context.Context, request EpisodeRequest) (Episo
 	}
 	if !found {
 		return EpisodeDetail{}, wrapError("get Episode", string(request.EpisodeID), ErrNotFound)
-	}
-	if record.ID == "" {
-		return EpisodeDetail{}, wrapError(
-			"get Episode", string(request.EpisodeID), fmt.Errorf("%w: empty Episode record", ErrInvalidState),
-		)
 	}
 	return EpisodeDetail{
 		EpisodeID:       EpisodeID(record.ID),

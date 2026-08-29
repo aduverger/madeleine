@@ -15,7 +15,10 @@ func (tx *Tx) FindRepositoryIDByAlias(ctx context.Context, kind, value string) (
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
-	return repositoryID, err == nil, err
+	if err != nil {
+		return "", false, err
+	}
+	return repositoryID, true, nil
 }
 
 func (tx *Tx) InsertRepository(ctx context.Context, record RepositoryRecord, createdAt time.Time) error {
