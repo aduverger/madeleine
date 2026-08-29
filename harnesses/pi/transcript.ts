@@ -12,6 +12,11 @@ interface ProjectedEntry {
   text: string;
 }
 
+interface TextBlock {
+  type: "text";
+  text: string;
+}
+
 export function projectCaptureTranscript(
   entries: SessionEntry[],
   startCursor: string,
@@ -101,15 +106,13 @@ function projectEntry(entry: SessionEntry): ProjectedEntry[] {
 function contentText(content: unknown): string {
   if (typeof content === "string") return cleanText(content);
   if (!Array.isArray(content)) return "";
-  return cleanText(
-    content
-      .filter((block): block is { type: "text"; text: string } =>
-        typeof block === "object" && block !== null &&
-        (block as { type?: unknown }).type === "text" &&
-        typeof (block as { text?: unknown }).text === "string")
-      .map((block) => block.text)
-      .join("\n"),
-  );
+  return cleanText(content.filter(isTextBlock).map((block) => block.text).join("\n"));
+}
+
+function isTextBlock(value: unknown): value is TextBlock {
+  if (typeof value !== "object" || value === null) return false;
+  const block = value as Partial<TextBlock>;
+  return block.type === "text" && typeof block.text === "string";
 }
 
 function cleanText(text: string): string {

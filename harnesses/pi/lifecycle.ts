@@ -12,9 +12,13 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { Capture, Episode, FinalizationDraft } from "./rpc.ts";
+import type { Capture, FinalizationDraft } from "./rpc.ts";
 import { PiState, type ConversationIdentity } from "./state.ts";
-import { EpisodeFinalizer, type EpisodeFinalization } from "./summary.ts";
+import {
+  EpisodeFinalizer,
+  type EpisodeFinalization,
+  type SummaryClient,
+} from "./summary.ts";
 
 const writeRefreshIntervalMs = 30_000;
 const unicodeSpaces = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
@@ -29,11 +33,14 @@ export interface RolloverResult {
   startedCaptureID: string;
 }
 
-export interface RetryResult {
+export type RetryResult = {
   captureID: string;
-  status: "published" | "failed";
-  episodeID?: string;
-}
+  status: "failed";
+} | {
+  captureID: string;
+  status: "published";
+  episodeID: string;
+};
 
 export interface CaptureFinalizer {
   finalize(
@@ -43,7 +50,7 @@ export interface CaptureFinalizer {
   ): Promise<EpisodeFinalization>;
 }
 
-export interface CaptureClient {
+export interface CaptureClient extends SummaryClient {
   startCapture(
     repositoryRoot: string,
     externalID: string,
@@ -59,12 +66,6 @@ export interface CaptureClient {
   ): Promise<Capture[]>;
   recordWrite(captureID: string, path: string, signal?: AbortSignal): Promise<void>;
   sealCapture(captureID: string, endCursor: string, signal?: AbortSignal): Promise<FinalizationDraft>;
-  publishEpisode(
-    captureID: string,
-    l1: string,
-    l2: string,
-    signal?: AbortSignal,
-  ): Promise<Episode>;
 }
 
 export class CaptureLifecycle {
