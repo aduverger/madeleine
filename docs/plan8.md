@@ -168,7 +168,8 @@ finalization, and crash recovery.
 - Aligned read-path lookup with Pi's built-in normalization, including file
   URLs, and bounded L2 tool output with Pi's exported 50KB/2000-line truncation
   defaults after independent review identified exact-path misses and unbounded
-  model-facing output.
+  model-facing output. Essential metadata and L1/L2 precede the variable-length
+  path list so truncation preserves the Episode brief.
 
 ## Entire inspection record
 

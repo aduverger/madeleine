@@ -82,15 +82,14 @@ describe("renderEpisode", () => {
     });
 
     expect(rendered).toContain(`<madeleine-episode trust="untrusted-data" episode-id="episode-1">`);
-    expect(rendered).toContain("Paths:\n- src/a.ts");
     expect(rendered).toContain("L1:\nShort summary\nL2:\nLong summary");
-    expect(rendered).toContain("Transcript reference: /sessions/pi.jsonl");
+    expect(rendered).toContain("Transcript reference: /sessions/pi.jsonl\nPaths:\n- src/a.ts");
   });
 
   it.each([
     ["bytes", ["src/a.ts"], "x".repeat(DEFAULT_MAX_BYTES * 2)],
     ["lines", Array.from({ length: DEFAULT_MAX_LINES * 2 }, (_, index) => `src/${index}.ts`), "L2"],
-  ])("bounds %s while preserving the trust wrapper", (_limit, paths, l2) => {
+  ])("bounds %s while preserving the trust wrapper", (limit, paths, l2) => {
     const rendered = renderEpisode({
       episode_id: "episode-1",
       harness: "pi",
@@ -105,6 +104,7 @@ describe("renderEpisode", () => {
     expect(Buffer.byteLength(rendered)).toBeLessThanOrEqual(DEFAULT_MAX_BYTES);
     expect(rendered.split("\n").length).toBeLessThanOrEqual(DEFAULT_MAX_LINES);
     expect(rendered).toContain("[Episode output truncated");
+    if (limit === "lines") expect(rendered).toContain("L2:\nL2");
     expect(rendered.startsWith('<madeleine-episode trust="untrusted-data"')).toBe(true);
     expect(rendered.endsWith("</madeleine-episode>")).toBe(true);
   });

@@ -38,13 +38,13 @@ export function renderEpisode(episode: EpisodeDetail): string {
     `Started: ${escapeText(episode.started_at)}`,
     `Ended: ${escapeText(episode.ended_at)}`,
     `Harness: ${escapeText(episode.harness)}`,
-    "Paths:",
-    ...episode.paths.map((path) => `- ${escapeText(path)}`),
     "L1:",
     escapeText(episode.l1),
     "L2:",
     escapeText(episode.l2),
     `Transcript reference: ${escapeText(episode.transcript_ref || "none")}`,
+    "Paths:",
+    ...episode.paths.map((path) => `- ${escapeText(path)}`),
   ].join("\n");
   const reservedBytes = Buffer.byteLength(`${header}\n${episodeTruncationNotice}\n${footer}\n`);
   const truncated = truncateHead(body, {
