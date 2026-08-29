@@ -279,8 +279,8 @@ func insertTestCapturePaths(t *testing.T, store *testService, captureID CaptureI
 	}
 	defer transaction.Rollback()
 	statement, err := transaction.Prepare(`
-		INSERT INTO capture_paths(capture_id, path, source, first_seen_at, last_seen_at)
-		VALUES (?, ?, 'tool', ?, ?)`)
+		INSERT INTO capture_paths(capture_id, path, first_seen_at, last_seen_at)
+		VALUES (?, ?, ?, ?)`)
 	if err != nil {
 		t.Fatal(err)
 	}

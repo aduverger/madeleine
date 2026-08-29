@@ -2,7 +2,12 @@
 
 PR scope: one PR  
 Depends on: `plan5.md`  
-Design decisions: D-002, D-008, D-009, D-016, D-020, D-021, D-022
+Design decisions: D-002, D-008, D-009 (superseded), D-016, D-020, D-021, D-022, D-024
+
+> Historical note: this plan records the package migration as merged. The
+> post-Plan-9 MVP revision removed `internal/gitstate`, Git baseline persistence,
+> and reconciliation orchestration; current architecture is documented in
+> `design.md`.
 
 ## Goal
 

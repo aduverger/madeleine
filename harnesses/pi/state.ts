@@ -31,7 +31,9 @@ export class PiState {
   initialize(ctx: ExtensionContext, reason: "startup" | "reload" | "new" | "resume" | "fork"): ConversationIdentity {
     const sessionFile = ctx.sessionManager.getSessionFile();
     const persistedExternalID = sessionFile ? resolve(sessionFile) : undefined;
-    const restored = reason === "reload" ? newestState(ctx, persistedExternalID) : undefined;
+    const restoresExistingConversation =
+      reason === "startup" || reason === "reload" || reason === "resume";
+    const restored = restoresExistingConversation ? newestState(ctx, persistedExternalID) : undefined;
 
     this.externalConversationID = persistedExternalID ?? restored?.conversation_id ?? this.generateID();
     this.activeCaptureID = restored?.capture_id;

@@ -35,18 +35,16 @@ func (tx *Tx) FindOpenCaptureID(ctx context.Context, conversationID, openStatus 
 	return captureID, true, nil
 }
 
-func (tx *Tx) InsertCapture(ctx context.Context, record CaptureRecord, head string, headExists bool) error {
+func (tx *Tx) InsertCapture(ctx context.Context, record CaptureRecord) error {
 	transcriptRef := sql.NullString{String: record.TranscriptRef, Valid: record.TranscriptRef != ""}
-	gitStartHead := sql.NullString{String: head, Valid: headExists}
 	_, err := tx.tx.ExecContext(ctx, `
 		INSERT INTO captures(
 			id, conversation_id, repository_id, worktree_root, status,
-			transcript_ref, start_cursor, started_at, last_seen_at,
-			git_start_head, git_start_head_exists
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			transcript_ref, start_cursor, started_at, last_seen_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		record.ID, record.ConversationID, record.RepositoryID, record.WorktreeRoot,
 		record.Status, transcriptRef, record.StartCursor, timestamp(record.StartedAt),
-		timestamp(record.LastSeenAt), gitStartHead, headExists)
+		timestamp(record.LastSeenAt))
 	return err
 }
 
@@ -106,19 +104,15 @@ func (db *DB) ListPendingCaptures(
 
 func (tx *Tx) UpsertCapturePath(
 	ctx context.Context,
-	captureID, path, source string,
+	captureID, path string,
 	seenAt time.Time,
-	updateExisting bool,
 ) error {
-	conflict := "DO NOTHING"
-	if updateExisting {
-		conflict = "DO UPDATE SET last_seen_at = excluded.last_seen_at"
-	}
 	_, err := tx.tx.ExecContext(ctx, `
-		INSERT INTO capture_paths(capture_id, path, source, first_seen_at, last_seen_at)
-		VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(capture_id, path) `+conflict,
-		captureID, path, source, timestamp(seenAt), timestamp(seenAt))
+		INSERT INTO capture_paths(capture_id, path, first_seen_at, last_seen_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(capture_id, path)
+		DO UPDATE SET last_seen_at = excluded.last_seen_at`,
+		captureID, path, timestamp(seenAt), timestamp(seenAt))
 	return err
 }
 
@@ -192,12 +186,8 @@ func (tx *Tx) FinalizeCapture(
 }
 
 func (tx *Tx) DeleteCaptureRawState(ctx context.Context, captureID string) error {
-	if _, err := tx.tx.ExecContext(ctx,
-		"DELETE FROM capture_paths WHERE capture_id = ?", captureID); err != nil {
-		return err
-	}
 	_, err := tx.tx.ExecContext(ctx,
-		"DELETE FROM capture_git_baseline_paths WHERE capture_id = ?", captureID)
+		"DELETE FROM capture_paths WHERE capture_id = ?", captureID)
 	return err
 }
 

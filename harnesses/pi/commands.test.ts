@@ -33,13 +33,24 @@ function setup(options: { captures?: Capture[]; checks?: DoctorCheck[]; confirme
   const current = {
     currentCaptureID: vi.fn(() => "capture-current" as string | undefined),
     clearCurrentCapture: vi.fn(),
+    rollover: vi.fn(async () => ({
+      sealed: {
+        capture_id: "capture-current",
+        status: "pending_summary" as const,
+        empty: false,
+        paths: ["src/a.ts"],
+      },
+      startedCaptureID: "capture-next",
+    })),
   };
   const notify = vi.fn();
   const confirm = vi.fn(async () => options.confirmed ?? false);
+  const waitForIdle = vi.fn(async () => undefined);
   const ctx = {
     cwd: "/repo",
     hasUI: true,
     ui: { notify, confirm },
+    waitForIdle,
   } as unknown as ExtensionCommandContext;
   registerCommands(pi, client, current);
   return {
@@ -48,6 +59,7 @@ function setup(options: { captures?: Capture[]; checks?: DoctorCheck[]; confirme
     current,
     notify,
     confirm,
+    waitForIdle,
   };
 }
 
@@ -74,6 +86,18 @@ describe("/madeleine", () => {
       "info",
     );
     expect(test.notify.mock.calls[0]?.[0]).toContain("capture-pending  pending_summary");
+  });
+
+  it("waits for idle before rolling over the current Capture", async () => {
+    const test = setup();
+    await test.run("rollover");
+
+    expect(test.waitForIdle).toHaveBeenCalledOnce();
+    expect(test.current.rollover).toHaveBeenCalledOnce();
+    expect(test.notify).toHaveBeenCalledWith(
+      "Sealed Capture capture-current; Episode publication is pending.\nStarted Capture capture-next.",
+      "info",
+    );
   });
 
   it("confirms and abandons only a Capture listed for the repository", async () => {

@@ -44,8 +44,9 @@ existing view of current code and Git history.
    immutable result after publication.
 6. **Harnesses deliver context; the core owns semantics.** Pi is the first
    complete adapter, not the definition of Madeleine's domain model.
-7. **Fail open.** Failure to find the binary, query SQLite, inspect Git, or call
-   a summarization model must never break the harness's normal tools.
+7. **Fail open.** Failure to find the binary, query SQLite, resolve a Git
+   repository, or call a summarization model must never break the harness's
+   normal tools.
 8. **Optimize from evidence.** SQLite and direct process invocation remain until
    benchmarks show a real bottleneck.
 9. **Reuse before rebuilding.** Entire is the primary implementation reference.
@@ -103,8 +104,8 @@ death.
 
 ### Capture
 
-Operational state for one unfinished interval of work. A Capture stores raw
-modified paths, timestamps, transcript boundaries, and the Git start baseline.
+Operational state for one unfinished interval of work. A Capture stores
+intentionally modified paths, timestamps, and transcript boundaries.
 
 Capture states are:
 
@@ -129,9 +130,10 @@ An immutable historical record produced from one finalized Capture. It holds:
 - transcript reference and opaque entry boundaries.
 
 The core does not require one Conversation to map to one Episode. The Pi MVP
-chooses the simple policy that one clean Pi runtime/run produces one Episode.
-This permits future checkpoint Episodes or multiple Episodes in a long-running
-Conversation without changing the model.
+keeps one Capture open until a clean session transition, process exit, or manual
+rollover. Reload and process restart reattach an open Capture for the same
+Conversation. This keeps Episodes coarser than individual prompts while allowing
+multiple deliberate Episodes in a long-running Conversation.
 
 ### Capture and Episode lifecycle
 
@@ -162,15 +164,14 @@ warn, wait, communicate, or ignore that fact.
 
 ```text
 session_start
-    -> start Capture with transcript start cursor and Git baseline
+    -> reattach the Conversation's open Capture, or start one with a transcript cursor
 
 successful edit/write
     -> record exact path immediately
 
 session_shutdown (quit/new/resume/fork)
     -> seal Capture
-    -> reconcile recorded paths with Git
-    -> abandon if the final path set is empty
+    -> abandon if the structured path set is empty
     -> generate L1/L2 with the active Pi model
     -> atomically publish Episode
 ```
@@ -193,18 +194,25 @@ entries so a reload does not duplicate historical context.
 
 ### Crash and resume
 
-An abrupt exit leaves Capture A `open`. When the same Conversation is opened
-again:
+An abrupt exit leaves the current Capture `open`. Opening the same persisted Pi
+Conversation validates and reattaches that Capture, preserving its paths,
+transcript start boundary, and injection state. No filesystem changes made while
+Pi was stopped are inferred or attributed.
 
-1. Freeze A at the current transcript leaf and reconcile its Git state.
-2. Start an independent Capture B with a new Git baseline.
-3. Let Pi continue immediately.
-4. Retry frozen pending Captures for that Conversation oldest-first in one
-   background worker.
+A clean shutdown seals the Capture, so a later resume starts a new one. Sealed
+`pending_summary` Captures are retried oldest-first in one background worker.
+Each is attempted once per runtime, with at most one recovery model call active.
+Recovery is cancelled on shutdown and failures remain pending.
 
-Each pending Capture is attempted once per runtime, with at most one recovery
-model call active. Recovery is cancelled on shutdown and failed Captures remain
-pending. A and B never share paths, transcript boundaries, summaries, or state.
+### Manual rollover
+
+`/madeleine rollover` waits until Pi is idle, seals the current Capture through
+the same finalization path used by session shutdown, and starts a new Capture in
+the same Conversation. Once summary generation is available, successful sealing
+publishes an Episode before reporting completion; a recoverable summary failure
+leaves the old Capture pending while the new Capture records subsequent work.
+The adapter composes the existing `capture.seal` and `capture.start` RPC methods;
+there is no misleadingly atomic rollover method in the core API.
 
 ### Clean summary timeout
 
@@ -266,28 +274,18 @@ immediately; repeat touches refresh `last_seen_at` at most every 30 seconds.
 Reads are retrieval keys only. They are not stored as Capture activity or
 Episode history in the MVP.
 
-### Git reconciliation
+### Unstructured changes
 
-Structured events cannot observe shell scripts, generators, formatters, or
-external Git commits. Git is therefore a final safety net.
+The MVP intentionally does not infer Episode attribution from Git or filesystem
+state. Shell scripts, generators, formatters, external commits, human edits, and
+other sessions can change files without demonstrating that the current agent
+reasoned about them. Attaching all such paths would reduce retrieval precision.
 
-At Capture start Madeleine records:
-
-- optional start HEAD;
-- full porcelain status for dirty and untracked paths;
-- worktree fingerprints and index blob identity for those paths.
-
-At seal it unions:
-
-- successful structured write paths;
-- paths changed between start and end HEAD;
-- paths whose worktree/index state differs from the dirty-start snapshot.
-
-Git is invoked through the installed `git` CLI. Madeleine never modifies the
-worktree, index, refs, or configuration. Rename detection is disabled: an MVP
-rename is represented as deletion plus addition. A shell change made and fully
-reverted between start and seal is intentionally undiscoverable unless a
-structured write event recorded it.
+A source file changed exclusively through an opaque shell command can therefore
+be missed. Each harness should report successful mutations from its typed edit
+and write tools. Broader attribution may later be implemented as a separate Go
+package if dogfooding shows that these false negatives matter more than noisy
+history.
 
 ## Repository and path identity
 
@@ -346,7 +344,6 @@ repository_aliases
 conversations
 captures
 capture_paths
-capture_git_baseline_paths
 episodes
 episode_files
 ```
@@ -384,8 +381,7 @@ internal/cli         process setup, command selection, doctor, and version
 internal/rpc         JSON protocol and Service dispatch
 internal/madeleine   product rules and orchestration
 internal/store       SQLite persistence and migrations
-internal/gitstate    read-only Git snapshots and reconciliation
-internal/gitcmd      Git process execution
+internal/gitcmd      Git process execution for repository identity
 internal/repopath    repository-relative path normalization
 ```
 
@@ -476,14 +472,14 @@ The MVP is complete when the Pi vertical slice proves all of the following:
    L1 history.
 3. The model can explicitly retrieve the Episode's L2.
 4. `/reload` retains the current Capture and does not duplicate context.
-5. A crash leaves the old Capture recoverable; resume starts a new Capture and
-   retries the old one in the background.
-6. Structured paths plus Git reconciliation correctly cover normal edits,
-   shell changes, untracked files, staged changes, and commits made during the
-   run.
+5. A crash leaves the open Capture recoverable; reopening the same Conversation
+   reattaches it without attributing changes made while Pi was stopped.
+6. Only successful structured mutation events become Episode paths; opaque
+   shell, generated, formatted, human, and other-session changes are excluded.
 7. Empty runs create no Episode.
-8. Missing dependencies, SQLite contention, Git errors, and model failures do
-   not interfere with Pi's normal operation or silently discard pending state.
+8. Missing dependencies, SQLite contention, repository-discovery errors, and
+   model failures do not interfere with Pi's normal operation or silently
+   discard pending state.
 9. macOS and Linux checks pass.
 
 ## Explicit MVP non-goals
@@ -497,7 +493,8 @@ The MVP is complete when the Pi vertical slice proves all of the following:
 - Agent Trace or Git AI import/export;
 - real-time read presence or multi-agent steering UI;
 - daemon, socket service, network API, Postgres, replication, or team sharing;
-- web UI, MCP server, commit attribution, or line-survival tracking;
+- web UI, MCP server, Git/filesystem reconciliation, commit attribution, or
+  line-survival tracking;
 - configurable storage backends or summarizer-provider abstraction;
 - a public Go SDK or importable root package.
 
@@ -509,16 +506,18 @@ Future work is driven by dogfooding and measurements:
    lifecycle details outside the core.
 2. Backfill past harness transcripts using isolated importers.
 3. Derive folder history by aggregating descendant exact paths.
-4. Add rename/path lineage through Git when exact-path misses prove painful.
-5. Add file ranges or symbols only when hotspot files create measurable noise.
-6. Evolve context selection from newest-first using observed signals such as
+4. Evaluate opt-in Git or filesystem mutation attribution when structured-tool
+   false negatives prove more harmful than noisy associations.
+5. Add rename/path lineage through Git when exact-path misses prove painful.
+6. Add file ranges or symbols only when hotspot files create measurable noise.
+7. Evolve context selection from newest-first using observed signals such as
    changed-line count, Episode creation, or survival; never let embeddings
    establish causal provenance.
-7. Expose active Capture activity to orchestrators for same-machine agent
+8. Expose active Capture activity to orchestrators for same-machine agent
    coordination.
-8. Add a single-writer local broker only after SQLite contention is measured.
-9. Add PostgreSQL and authenticated sharing when activity spans machines.
-10. Add Agent Trace import/export as an interoperability layer, not an internal
+9. Add a single-writer local broker only after SQLite contention is measured.
+10. Add PostgreSQL and authenticated sharing when activity spans machines.
+11. Add Agent Trace import/export as an interoperability layer, not an internal
     schema.
 
 ## Rejected alternatives
@@ -592,16 +591,16 @@ reference boundary.
 | D-003 | Use one Episode-level L1/L2 plus raw transcript reference. | Locked | No per-file summaries and no generated L3. |
 | D-004 | Separate Conversation, Capture, and Episode. | Locked | Harness resumes do not overload the historical unit. |
 | D-005 | Keep unfinished Capture facts separate from immutable Episode history. | Locked | Capture activity can later support presence without defining orchestration policy. |
-| D-006 | One Pi runtime/run produces one Episode. | MVP policy | Future checkpoints remain possible without a core migration. |
+| D-006 | One Pi work interval produces one Episode; clean shutdown or manual rollover ends the interval. | MVP policy | Episodes span prompts and may survive process restart without becoming session-long by necessity. |
 | D-007 | Persist successful writes during the run. | Locked | Crashes retain useful Capture state. Reads are not persisted. |
 | D-008 | SQLite WAL is the sole MVP persistence layer. | Locked | No canonical JSON, journal files, daemon, or alternate backend. |
-| D-009 | Use Git CLI reconciliation as a safety net. | Locked | Shell and commit changes augment structured tool evidence. |
+| D-009 | Use Git CLI reconciliation as a safety net. | Superseded by D-024 | Exhaustive change detection produced noisy file-to-context associations and lifecycle edge cases. |
 | D-010 | Build a harness-neutral Go library plus JSON CLI. | Superseded by D-022 | No concrete external Go consumer justified maintaining two APIs. |
 | D-011 | Pi is the first complete reference adapter. | Locked | The final MVP is validated in the user's primary harness. |
 | D-012 | Inject five newest L1s per exact path. | MVP policy | Context selection is deterministic and isolated for future evolution. |
 | D-013 | Generate summaries with Pi's active model. | Locked | No separate model-provider configuration in MVP. |
-| D-014 | Reload reattaches; resume starts a new Capture. | Locked | Runtime intervals remain independent historical units. |
-| D-015 | Retry stale Captures in the background, sequentially. | Locked | Recovery does not delay the new Pi run. |
+| D-014 | Reload and process restart reattach an open Capture for the same Conversation; clean resume starts a new one. | Locked | Crashes preserve one work interval without attributing downtime filesystem changes. |
+| D-015 | Retry sealed pending-summary Captures in the background, sequentially. | Locked | Recovery does not delay the current Pi work interval. |
 | D-016 | All integration failures are fail-open. | Locked | Madeleine cannot break normal code-agent behavior. |
 | D-017 | Treat injected memory as untrusted data. | Locked | Stored summaries cannot silently become privileged instructions. |
 | D-018 | Agent Trace is future interoperability only. | Deferred | Internal persistence is not shaped around an external attribution RFC. |
@@ -610,6 +609,7 @@ reference boundary.
 | D-021 | Inspect Entire and reuse compatible code before rebuilding equivalent mechanics. | Locked | Each PR records reused provenance or why reuse did not fit; Madeleine's semantics remain authoritative. |
 | D-022 | Ship Madeleine as a standalone application with private Go packages and versioned JSON RPC as its external API. | Locked | Harnesses share one protocol; internal package structure can evolve without Go API compatibility constraints. |
 | D-023 | Organize and package harness integrations under `harnesses/<harness>`. | Locked | Each harness owns its integration mechanics and release format; only proven common behavior is shared through the CLI or later extraction. |
+| D-024 | Attribute Episode paths only from successful structured harness mutation events in the MVP. | Locked | Git/filesystem reconciliation is deferred; retrieval precision is preferred over exhaustive change detection. |
 
 ## Reference documentation
 

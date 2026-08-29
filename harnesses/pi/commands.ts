@@ -3,9 +3,10 @@ import type {
   ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
 
+import type { RolloverResult } from "./lifecycle.ts";
 import type { Capture, DoctorCheck } from "./rpc.ts";
 
-const usage = "Usage: /madeleine status | abandon <capture-id> | doctor";
+const usage = "Usage: /madeleine status | rollover | abandon <capture-id> | doctor";
 
 interface CommandClient {
   doctor(repositoryRoot: string): Promise<DoctorCheck[]>;
@@ -13,27 +14,31 @@ interface CommandClient {
   abandonCapture(captureID: string): Promise<void>;
 }
 
-interface CurrentCapture {
+interface CaptureController {
   currentCaptureID(): string | undefined;
   clearCurrentCapture(captureID: string): void;
+  rollover(ctx: ExtensionCommandContext): Promise<RolloverResult>;
 }
 
 export function registerCommands(
   pi: ExtensionAPI,
   client: CommandClient,
-  current: CurrentCapture,
+  captureController: CaptureController,
 ): void {
   pi.registerCommand("madeleine", {
-    description: "Show Madeleine status, abandon a Capture, or run doctor checks",
+    description: "Show status, roll over or abandon a Capture, or run doctor checks",
     handler: async (argumentsText, ctx) => {
       const argumentsList = argumentsText.trim().split(/\s+/).filter(Boolean);
       switch (argumentsList[0]) {
         case "status":
           if (argumentsList.length !== 1) return showUsage(ctx);
-          return showStatus(client, current.currentCaptureID(), ctx);
+          return showStatus(client, captureController.currentCaptureID(), ctx);
+        case "rollover":
+          if (argumentsList.length !== 1) return showUsage(ctx);
+          return rollover(captureController, ctx);
         case "abandon":
           if (argumentsList.length !== 2) return showUsage(ctx);
-          return abandon(client, current, argumentsList[1]!, ctx);
+          return abandon(client, captureController, argumentsList[1]!, ctx);
         case "doctor":
           if (argumentsList.length !== 1) return showUsage(ctx);
           return showDoctor(client, ctx);
@@ -65,9 +70,25 @@ async function showStatus(
   }
 }
 
+async function rollover(
+  captureController: CaptureController,
+  ctx: ExtensionCommandContext,
+): Promise<void> {
+  try {
+    await ctx.waitForIdle();
+    const result = await captureController.rollover(ctx);
+    const outcome = result.sealed.empty
+      ? `Abandoned empty Capture ${result.sealed.capture_id}.`
+      : `Sealed Capture ${result.sealed.capture_id}; Episode publication is pending.`;
+    ctx.ui.notify(`${outcome}\nStarted Capture ${result.startedCaptureID}.`, "info");
+  } catch {
+    ctx.ui.notify("Madeleine could not roll over the current Capture.", "error");
+  }
+}
+
 async function abandon(
   client: CommandClient,
-  current: CurrentCapture,
+  captureController: CaptureController,
   captureID: string,
   ctx: ExtensionCommandContext,
 ): Promise<void> {
@@ -91,7 +112,7 @@ async function abandon(
     if (!confirmed) return;
 
     await client.abandonCapture(captureID);
-    current.clearCurrentCapture(captureID);
+    captureController.clearCurrentCapture(captureID);
     ctx.ui.notify(`Abandoned Madeleine Capture ${captureID}.`, "info");
   } catch {
     ctx.ui.notify("Madeleine could not abandon that Capture.", "error");
