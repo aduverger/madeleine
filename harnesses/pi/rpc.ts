@@ -55,7 +55,6 @@ export interface EpisodeDetail {
 
 interface ProcessResult {
   stdout: string;
-  stderr: string;
   exitCode: number;
 }
 
@@ -85,15 +84,11 @@ export class RPCClient {
   }
 
   async doctor(repositoryRoot: string): Promise<DoctorCheck[]> {
-    const processResult = await this.run(
-      ["doctor", "--json", "--repo", repositoryRoot],
-      undefined,
-      undefined,
-    );
+    const processResult = await this.run(["doctor", "--json", "--repo", repositoryRoot]);
     if (processResult.exitCode !== 0 && processResult.exitCode !== 1) {
       throw new AdapterError("process_failure", "Madeleine doctor failed");
     }
-    return decodeSuccess(processResult.stdout, validateDoctorChecks);
+    return decodeDoctorChecks(processResult.stdout);
   }
 
   async contextForPath(
@@ -159,7 +154,6 @@ export class RPCClient {
       }
 
       const stdout: Buffer[] = [];
-      const stderr: Buffer[] = [];
       let stdoutBytes = 0;
       let stderrBytes = 0;
       let settled = false;
@@ -201,7 +195,6 @@ export class RPCClient {
           fail(new AdapterError("oversized_output", "Madeleine stderr exceeded the output limit"));
           return;
         }
-        stderr.push(chunk);
       });
       child.on("error", () => fail(new AdapterError("unavailable", "Madeleine is unavailable")));
       child.on("close", (code) => {
@@ -210,7 +203,6 @@ export class RPCClient {
         cleanup();
         resolve({
           stdout: Buffer.concat(stdout).toString("utf8"),
-          stderr: Buffer.concat(stderr).toString("utf8"),
           exitCode: code ?? 1,
         });
       });
@@ -220,12 +212,12 @@ export class RPCClient {
   }
 }
 
-function decodeSuccess<T>(payload: string, validateResult: (value: unknown) => T): T {
+function decodeDoctorChecks(payload: string): DoctorCheck[] {
   const response = decodeEnvelope(payload);
   if (!response.ok) {
     throw new AdapterError("remote", "Madeleine operation failed", response.error?.code);
   }
-  return validateResult(response.result);
+  return validateDoctorChecks(response.result);
 }
 
 function decodeEnvelope(payload: string): ResponseEnvelope {

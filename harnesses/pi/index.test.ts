@@ -14,7 +14,6 @@ type Handler = (event: any, context: ExtensionContext) => Promise<unknown> | unk
 
 class FakeExtension {
   readonly handlers = new Map<string, Handler[]>();
-  tool: any;
 
   readonly api = {
     on: (event: string, handler: Handler) => {
@@ -22,9 +21,7 @@ class FakeExtension {
       handlers.push(handler);
       this.handlers.set(event, handlers);
     },
-    registerTool: (tool: any) => {
-      this.tool = tool;
-    },
+    registerTool: () => undefined,
   } as unknown as ExtensionAPI;
 
   async emit(event: string, payload: unknown, context: ExtensionContext): Promise<unknown[]> {
@@ -183,7 +180,7 @@ describe("read enrichment", () => {
 
 describe("startup detection", () => {
   it("notifies at most once when a required doctor check fails", async () => {
-    const unhealthy = healthyDoctorResult() as { checks: Array<{ name: string; ok: boolean; detail: string }> };
+    const unhealthy = healthyDoctorResult();
     unhealthy.checks.find((check) => check.name === "repository")!.ok = false;
     const fake = await createFakeMadeleine({ doctor: { result: unhealthy, exitCode: 1 } });
     fakes.push(fake);

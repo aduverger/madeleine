@@ -155,8 +155,8 @@ finalization, and crash recovery.
   requirements explicitly require Node checks in CI.
 - Added `.gitignore` because the new npm package creates `node_modules/`.
 - Added `Makefile` because Go's `./...` package pattern descends into the Pi
-  package's `node_modules`; Go checks now target the application's actual package
-  roots, `./cmd/...` and `./internal/...`.
+  package's `node_modules`; Go checks now target the application's actual
+  package roots, `./cmd/...` and `./internal/...`.
 - Added `harnesses/pi/test-helper.ts` for the shared fake executable required by
   the test plan.
 - Added package-local `LICENSE` and `NOTICE` copies because npm does not include

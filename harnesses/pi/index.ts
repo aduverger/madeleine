@@ -28,7 +28,6 @@ const requiredDoctorChecks = [
 export function registerMadeleine(pi: ExtensionAPI, client: MadeleineClient = new RPCClient()): void {
   let enabled = false;
   let detection: Promise<void> | undefined;
-  let notified = false;
   const claimedPaths = new Set<string>();
 
   const detect = async (ctx: ExtensionContext) => {
@@ -37,8 +36,7 @@ export function registerMadeleine(pi: ExtensionAPI, client: MadeleineClient = ne
     } catch {
       enabled = false;
     }
-    if (!enabled && ctx.hasUI && !notified) {
-      notified = true;
+    if (!enabled && ctx.hasUI) {
       ctx.ui.notify("Madeleine is disabled for this session.", "warning");
     }
   };

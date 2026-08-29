@@ -2,6 +2,8 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type { DoctorCheck } from "./rpc.ts";
+
 export interface FakeAction {
   result?: unknown;
   error?: { code: string; message: string };
@@ -11,7 +13,6 @@ export interface FakeAction {
   stdoutBytes?: number;
   stderrBytes?: number;
   delayMs?: number;
-  echoParams?: boolean;
   contextEpisodes?: unknown[];
 }
 
@@ -48,7 +49,7 @@ const respond = () => {
   } else if (action.rawStdout !== undefined) {
     process.stdout.write(action.rawStdout);
   } else {
-    let result = action.echoParams ? request?.params : action.result;
+    let result = action.result;
     if (action.contextEpisodes) {
       result = [{ path: request?.params?.paths?.[0], episodes: action.contextEpisodes }];
     }
@@ -78,7 +79,7 @@ if (action.delayMs) setTimeout(respond, action.delayMs); else respond();
   };
 }
 
-export function healthyDoctorResult(): unknown {
+export function healthyDoctorResult(): { checks: DoctorCheck[] } {
   return {
     checks: [
       { name: "binary_version", ok: true, detail: "dev" },

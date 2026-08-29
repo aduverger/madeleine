@@ -46,7 +46,7 @@ Use the madeleine_episode tool with an episode_id for the longer brief.
 
   it("escapes stored wrapper-like text", () => {
     const rendered = renderFileContext({
-      path: `src/\"bad\">.ts`,
+      path: `src/"bad">.ts`,
       episodes: [
         {
           episode_id: "episode-1",
