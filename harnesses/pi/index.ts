@@ -7,15 +7,29 @@ import {
 import { registerCommands } from "./commands.ts";
 import { registerEpisodeTool } from "./episode-tool.ts";
 import { CaptureLifecycle, type CaptureClient, resolvePiToolPath } from "./lifecycle.ts";
-import { type DoctorCheck, type EpisodeDetail, type FileContext, RPCClient } from "./rpc.ts";
+import {
+  type DoctorCheck,
+  type EpisodeDetail,
+  type FileContext,
+  RPCClient,
+  type TranscriptView,
+} from "./rpc.ts";
 import { renderFileContext } from "./render.ts";
 import { PiState } from "./state.ts";
+import { registerTranscriptTool } from "./transcript-tool.ts";
 
 interface MadeleineClient extends CaptureClient {
   doctor(repositoryRoot: string): Promise<DoctorCheck[]>;
   abandonCapture(captureID: string, signal?: AbortSignal): Promise<void>;
   contextForPath(repositoryRoot: string, path: string, signal?: AbortSignal): Promise<FileContext[]>;
   getEpisode(repositoryRoot: string, episodeID: string, signal?: AbortSignal): Promise<EpisodeDetail>;
+  getTranscript(
+    repositoryRoot: string,
+    transcriptID: string,
+    view: "compact" | "raw",
+    offset?: number,
+    signal?: AbortSignal,
+  ): Promise<TranscriptView>;
 }
 
 const requiredDoctorChecks = [
@@ -58,6 +72,7 @@ export function registerMadeleine(pi: ExtensionAPI, client: MadeleineClient = ne
   lifecycle.register(pi);
 
   registerEpisodeTool(pi, client, () => enabled);
+  registerTranscriptTool(pi, client, () => enabled);
   registerCommands(pi, client, lifecycle);
 }
 

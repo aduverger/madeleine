@@ -7,14 +7,22 @@ import {
   type CaptureClient,
   type CaptureFinalizer,
 } from "./lifecycle.ts";
-import type { Capture, Episode, FinalizationDraft } from "./rpc.ts";
+import type { Capture, Episode, FinalizationDraft, TranscriptView } from "./rpc.ts";
+import type { TranscriptInput } from "./transcript.ts";
 import { PiState, stateEntryType } from "./state.ts";
 
 type Handler = (event: any, ctx: ExtensionContext) => Promise<unknown> | unknown;
 
 class FakePi {
   readonly handlers = new Map<string, Handler[]>();
-  readonly entries: any[] = [];
+  readonly entries: any[] = [{
+    type: "custom",
+    id: "leaf-1",
+    parentId: null,
+    timestamp: "2026-01-01T00:00:00Z",
+    customType: "test-boundary",
+    data: {},
+  }];
   leaf: string | null = "leaf-1";
 
   readonly api = {
@@ -42,17 +50,16 @@ class FakeClient implements CaptureClient {
   emptySeal = false;
   blockWrites = false;
   nextID = 1;
+  sealedTranscript: TranscriptInput | undefined;
 
   async startCapture(
     repositoryRoot: string,
     externalID: string,
-    transcriptRef: string,
     startCursor: string,
   ): Promise<Capture> {
     this.maybeFail("start");
     const capture = captureRecord(`capture-${this.nextID++}`, externalID, {
       worktree_root: repositoryRoot,
-      transcript_ref: transcriptRef || undefined,
       start_cursor: startCursor,
     });
     this.captures.push(capture);
@@ -88,21 +95,48 @@ class FakeClient implements CaptureClient {
     });
   }
 
-  async sealCapture(captureID: string, endCursor: string): Promise<FinalizationDraft> {
+  async sealCapture(
+    captureID: string,
+    endCursor: string,
+    transcript?: TranscriptInput,
+  ): Promise<FinalizationDraft> {
     this.maybeFail("seal");
     this.calls.push({ method: "seal", captureID });
+    this.sealedTranscript = transcript;
     const capture = this.captures.find((candidate) => candidate.id === captureID)!;
     capture.status = this.emptySeal ? "abandoned" : "pending_summary";
     capture.end_cursor = endCursor;
+    capture.transcript_id = this.emptySeal ? undefined : `transcript-${captureID}`;
     return {
       capture_id: captureID,
+      transcript_id: capture.transcript_id,
       status: capture.status,
       empty: this.emptySeal,
       paths: this.emptySeal ? [] : ["src/a.ts"],
     };
   }
 
-  async publishEpisode(captureID: string, l1: string, l2: string): Promise<Episode> {
+  async getTranscript(
+    _repositoryRoot: string,
+    transcriptID: string,
+    view: "compact" | "raw",
+    _offset?: number,
+  ): Promise<TranscriptView> {
+    this.maybeFail("transcript");
+    this.calls.push({ method: "transcript" });
+    return {
+      transcript_id: transcriptID,
+      view,
+      entries: [{ kind: "user", text: "Test evidence" }],
+    };
+  }
+
+  async publishEpisode(
+    captureID: string,
+    l1: string,
+    l2: string,
+    _compactEvidence: string,
+  ): Promise<Episode> {
     this.maybeFail("publish");
     this.calls.push({ method: "publish", captureID });
     const capture = this.captures.find((candidate) => candidate.id === captureID)!;
@@ -127,8 +161,7 @@ function episodeRecord(capture: Capture, l1: string, l2: string): Episode {
     paths: ["src/a.ts"],
     l1,
     l2,
-    start_cursor: capture.start_cursor,
-    end_cursor: capture.end_cursor!,
+    transcript_id: capture.transcript_id!,
     started_at: capture.started_at,
     ended_at: "2026-01-01T00:01:00Z",
     created_at: "2026-01-01T00:01:01Z",
@@ -159,12 +192,13 @@ function testContext(pi: FakePi, sessionFile = "/sessions/current.jsonl") {
     ui: { notify },
     sessionManager: {
       getSessionFile: () => sessionFile,
+      getSessionId: () => "018f0000-0000-7000-8000-000000000123",
       getLeafId: () => pi.leaf,
       getBranch: () => pi.entries,
       getEntries: () => pi.entries,
     },
   } as unknown as ExtensionContext;
-  return { ctx, notify, externalID: resolve(sessionFile) };
+  return { ctx, notify, externalID: "018f0000-0000-7000-8000-000000000123" };
 }
 
 function setup(
@@ -253,7 +287,7 @@ describe("Capture lifecycle", () => {
     expect(client.calls.map((call) => call.method)).toEqual(["list"]);
     expect(lifecycle.currentCaptureID()).toBe("capture-existing");
     expect(state.claimPath("src/a.ts")).toBe(false);
-    expect(pi.entries).toHaveLength(1);
+    expect(pi.entries).toHaveLength(2);
   });
 
   it.each(["reload", "resume"] as const)(
@@ -282,6 +316,49 @@ describe("Capture lifecycle", () => {
     },
   );
 
+  it("submits canonical bounded entries while sealing", async () => {
+    const { pi, client, ctx } = setup();
+    await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
+    const callID = "write-call";
+    pi.entries.push({
+      type: "message",
+      id: "assistant-call",
+      parentId: pi.leaf,
+      timestamp: "2026-01-01T00:00:01Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: callID, name: "write", arguments: { path: "src/a.ts", content: "secret" } }],
+      },
+    });
+    pi.leaf = "assistant-call";
+    pi.entries.push({
+      type: "message",
+      id: "write-result",
+      parentId: pi.leaf,
+      timestamp: "2026-01-01T00:00:02Z",
+      message: {
+        role: "toolResult",
+        toolCallId: callID,
+        toolName: "write",
+        content: [{ type: "text", text: "written" }],
+        isError: false,
+      },
+    });
+    pi.leaf = "write-result";
+
+    await pi.emit("session_shutdown", { type: "session_shutdown", reason: "quit" }, ctx);
+
+    expect(client.sealedTranscript).toEqual({
+      format_version: 1,
+      entries: [{
+        kind: "mutation",
+        operation: "write",
+        path: "src/a.ts",
+        status: "success",
+      }],
+    });
+  });
+
   it("publishes on every clean shutdown reason", async () => {
     for (const reason of ["quit", "new", "resume", "fork"] as const) {
       const finalize = vi.fn(async (sealed: FinalizationDraft) => ({
@@ -306,7 +383,9 @@ describe("Capture lifecycle", () => {
       finalization: { captureID: "capture-1", status: "pending" },
       startedCaptureID: "capture-2",
     });
-    expect(client.calls.map((call) => call.method)).toEqual(["list", "start", "seal", "get", "start"]);
+    expect(client.calls.map((call) => call.method)).toEqual([
+      "list", "start", "get", "seal", "transcript", "start",
+    ]);
     expect(client.captures[1]?.conversation_key.external_id).toBe(externalID);
     expect(lifecycle.currentCaptureID()).toBe("capture-2");
   });
@@ -328,7 +407,17 @@ describe("Capture lifecycle", () => {
       },
       startedCaptureID: "capture-2",
     });
-    expect(client.calls.map((call) => call.method)).toEqual(["list", "start", "seal", "start"]);
+    expect(client.calls.map((call) => call.method)).toEqual(["list", "start", "get", "seal", "start"]);
+  });
+
+  it("keeps the Capture open when bounded projection fails before sealing", async () => {
+    const { pi, client, lifecycle, ctx } = setup();
+    await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
+    client.captures[0]!.start_cursor = "missing-start";
+
+    await expect(lifecycle.rollover(ctx)).rejects.toThrow("start cursor");
+    expect(lifecycle.currentCaptureID()).toBe("capture-1");
+    expect(client.calls.some((call) => call.method === "seal")).toBe(false);
   });
 
   it("keeps the current Capture usable when rollover sealing fails", async () => {
@@ -441,7 +530,9 @@ describe("Capture lifecycle", () => {
     await pi.emit("session_shutdown", { type: "session_shutdown", reason: "quit" }, ctx);
     await expect(write).resolves.toBeUndefined();
 
-    expect(client.calls.map((call) => call.method)).toEqual(["list", "start", "record", "seal", "get"]);
+    expect(client.calls.map((call) => call.method)).toEqual([
+      "list", "start", "record", "get", "seal", "transcript",
+    ]);
   });
 
   it("treats an empty seal as successful abandonment", async () => {

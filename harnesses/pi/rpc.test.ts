@@ -29,9 +29,7 @@ function episodeResult() {
     paths: ["src/a.ts"],
     l1: "Short summary",
     l2: "Detailed brief",
-    transcript_ref: "/sessions/one.jsonl",
-    start_cursor: "entry-1",
-    end_cursor: "entry-2",
+    transcript_id: "transcript-1",
     started_at: "2026-01-01T00:00:00Z",
     ended_at: "2026-01-01T00:01:00Z",
     created_at: "2026-01-01T00:01:01Z",
@@ -46,7 +44,6 @@ function captureResult() {
     conversation_key: { harness: "pi", external_id: "session-1" },
     worktree_root: "/repo",
     status: "open",
-    transcript_ref: "/sessions/one.jsonl",
     start_cursor: "entry-1",
     started_at: "2026-01-01T00:00:00Z",
     last_seen_at: "2026-01-01T00:00:00Z",
@@ -96,7 +93,7 @@ describe("RPCClient", () => {
       paths: ["src/a.ts"],
       l1: "short",
       l2: "long",
-      transcript_ref: "session.jsonl",
+      transcript_id: "transcript-1",
       started_at: "2026-01-01T00:00:00Z",
       ended_at: "2026-01-01T00:01:00Z",
     };
@@ -118,11 +115,21 @@ describe("RPCClient", () => {
           ],
         },
         "episode.get": { result: detail },
+        "transcript.get": {
+          result: {
+            transcript_id: "transcript-1",
+            view: "raw",
+            entries: [{ kind: "user", text: "evidence" }],
+          },
+        },
       },
     });
 
     await expect(client.contextForPath("/repo", "src/a.ts")).resolves.toHaveLength(1);
     await expect(client.getEpisode("/repo", "episode-1")).resolves.toEqual(detail);
+    await expect(client.getTranscript("/repo", "transcript-1", "raw")).resolves.toMatchObject({
+      entries: [{ kind: "user", text: "evidence" }],
+    });
   });
 
   it("validates Capture lifecycle results and request shapes", async () => {
@@ -136,6 +143,7 @@ describe("RPCClient", () => {
         "capture.seal": {
           result: {
             capture_id: "capture-1",
+            transcript_id: "transcript-1",
             status: "pending_summary",
             empty: false,
             paths: ["src/a.ts"],
@@ -147,17 +155,21 @@ describe("RPCClient", () => {
     });
 
     await expect(
-      client.startCapture("/repo", "session-1", "/sessions/one.jsonl", "entry-1"),
+      client.startCapture("/repo", "session-1", "entry-1"),
     ).resolves.toEqual(capture);
     await expect(client.getCapture("capture-1")).resolves.toEqual(capture);
     await expect(client.listPendingCaptures("/repo", "session-1")).resolves.toEqual([capture]);
     await expect(client.recordWrite("capture-1", "/repo/src/a.ts")).resolves.toBeUndefined();
-    await expect(client.sealCapture("capture-1", "entry-2")).resolves.toMatchObject({
+    const transcript = {
+      format_version: 1 as const,
+      entries: [{ kind: "user" as const, text: "evidence" }],
+    };
+    await expect(client.sealCapture("capture-1", "entry-2", transcript)).resolves.toMatchObject({
       status: "pending_summary",
       paths: ["src/a.ts"],
     });
     await expect(
-      client.publishEpisode("capture-1", "Short summary", "Detailed brief"),
+      client.publishEpisode("capture-1", "Short summary", "Detailed brief", "Compact evidence"),
     ).resolves.toEqual(episodeResult());
     await expect(client.abandonCapture("capture-1")).resolves.toBeUndefined();
 
@@ -167,7 +179,6 @@ describe("RPCClient", () => {
       request: {
         params: {
           conversation_key: { harness: "pi", external_id: "session-1" },
-          transcript_ref: "/sessions/one.jsonl",
           start_cursor: "entry-1",
         },
       },
@@ -181,7 +192,7 @@ describe("RPCClient", () => {
     );
 
     await expect(
-      client.startCapture("/repo", "session-1", "/sessions/one.jsonl", "entry-1"),
+      client.startCapture("/repo", "session-1", "entry-1"),
     ).rejects.toMatchObject({ kind: "timeout" });
   });
 

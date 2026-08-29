@@ -25,7 +25,10 @@ func validateEpisodeSummaries(l1, l2 string) (string, string, error) {
 
 func (s *Service) PublishEpisode(ctx context.Context, request PublishEpisodeRequest) (Episode, error) {
 	l1, l2, err := validateEpisodeSummaries(request.L1, request.L2)
-	if err != nil {
+	if err != nil || strings.TrimSpace(request.CompactEvidence) == "" {
+		if err == nil {
+			err = fmt.Errorf("%w: Episode compact evidence must not be empty", ErrInvalidState)
+		}
 		return Episode{}, wrapError("publish Episode", string(request.CaptureID), err)
 	}
 
@@ -51,8 +54,15 @@ func (s *Service) PublishEpisode(ctx context.Context, request PublishEpisodeRequ
 				return fmt.Errorf("%w: finalized Capture Episode does not exist", ErrInvalidState)
 			}
 			episode = episodeFromRecord(record)
-			if episode.L1 != l1 || episode.L2 != l2 {
-				return fmt.Errorf("%w: Capture was published with different summaries", ErrConflict)
+			transcript, found, err := transaction.GetTranscriptByCapture(ctx, capture.ID)
+			if err != nil {
+				return err
+			}
+			if !found || transcript.CompactText == nil {
+				return fmt.Errorf("%w: finalized Capture has no published Transcript", ErrInvalidState)
+			}
+			if episode.L1 != l1 || episode.L2 != l2 || *transcript.CompactText != request.CompactEvidence {
+				return fmt.Errorf("%w: Capture was published with different summaries or evidence", ErrConflict)
 			}
 			return nil
 		}
@@ -64,7 +74,12 @@ func (s *Service) PublishEpisode(ctx context.Context, request PublishEpisodeRequ
 		if err != nil {
 			return err
 		}
-		if len(paths) == 0 || capture.EndedAt == nil || capture.StartCursor == "" || capture.EndCursor == "" {
+		transcript, found, err := transaction.GetTranscriptByCapture(ctx, capture.ID)
+		if err != nil {
+			return err
+		}
+		if len(paths) == 0 || capture.EndedAt == nil || capture.TranscriptID == "" ||
+			!found || transcript.ID != capture.TranscriptID || transcript.CompactText != nil {
 			return fmt.Errorf("%w: pending Capture has incomplete finalization data", ErrInvalidState)
 		}
 
@@ -72,22 +87,28 @@ func (s *Service) PublishEpisode(ctx context.Context, request PublishEpisodeRequ
 		if err != nil {
 			return err
 		}
+		now := nowUTC()
 		record := store.EpisodeRecord{
 			ID:             string(episodeID),
 			CaptureID:      capture.ID,
 			RepositoryID:   capture.RepositoryID,
 			ConversationID: capture.ConversationID,
+			TranscriptID:   capture.TranscriptID,
 			Harness:        capture.Harness,
 			ExternalID:     capture.ExternalID,
 			Paths:          paths,
 			L1:             l1,
 			L2:             l2,
-			TranscriptRef:  capture.TranscriptRef,
-			StartCursor:    capture.StartCursor,
-			EndCursor:      capture.EndCursor,
 			StartedAt:      capture.StartedAt,
 			EndedAt:        *capture.EndedAt,
-			CreatedAt:      nowUTC(),
+			CreatedAt:      now,
+		}
+		published, err := transaction.PublishTranscript(ctx, capture.TranscriptID, request.CompactEvidence, now)
+		if err != nil {
+			return err
+		}
+		if !published {
+			return fmt.Errorf("%w: Transcript changed during publication", ErrConflict)
 		}
 		if err := transaction.InsertEpisode(ctx, record); err != nil {
 			return err
@@ -105,7 +126,7 @@ func (s *Service) PublishEpisode(ctx context.Context, request PublishEpisodeRequ
 		if !updated {
 			return fmt.Errorf("%w: Capture changed during publication", ErrConflict)
 		}
-		if err := transaction.DeleteCaptureRawState(ctx, capture.ID); err != nil {
+		if err := transaction.DeleteCapturePaths(ctx, capture.ID); err != nil {
 			return err
 		}
 		episode = episodeFromRecord(record)

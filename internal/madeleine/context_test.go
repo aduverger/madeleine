@@ -138,8 +138,8 @@ func TestGetEpisodeReturnsRepositoryScopedDetail(t *testing.T) {
 	if detail.Harness != episode.Harness || detail.L1 != episode.L1 || detail.L2 != episode.L2 {
 		t.Fatalf("Episode detail summaries = %#v", detail)
 	}
-	if detail.TranscriptRef != episode.TranscriptRef || detail.StartCursor != episode.StartCursor || detail.EndCursor != episode.EndCursor {
-		t.Fatalf("Episode detail transcript boundaries = %#v", detail)
+	if detail.TranscriptID != episode.TranscriptID {
+		t.Fatalf("Episode detail Transcript ID = %q, want %q", detail.TranscriptID, episode.TranscriptID)
 	}
 	if !detail.StartedAt.Equal(episode.StartedAt) || !detail.EndedAt.Equal(episode.EndedAt) {
 		t.Fatalf("Episode detail times = %#v", detail)
@@ -178,9 +178,10 @@ func publishTestEpisodeAt(t *testing.T, store *testService, root, endedAt string
 		t.Fatalf("set Capture end time: %v", err)
 	}
 	episode, err := store.PublishEpisode(context.Background(), PublishEpisodeRequest{
-		CaptureID: capture.ID,
-		L1:        "Summary for " + endedAt,
-		L2:        "Detailed context for " + endedAt,
+		CaptureID:       capture.ID,
+		L1:              "Summary for " + endedAt,
+		L2:              "Detailed context for " + endedAt,
+		CompactEvidence: "Evidence for " + endedAt,
 	})
 	if err != nil {
 		t.Fatalf("PublishEpisode: %v", err)

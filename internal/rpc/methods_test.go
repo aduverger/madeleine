@@ -30,8 +30,7 @@ func TestEveryRPCMethod(t *testing.T) {
 		ConversationKey: madeleine.ConversationKey{
 			Harness: madeleine.HarnessPi, ExternalID: "conversation-1",
 		},
-		TranscriptRef: "transcript.jsonl",
-		StartCursor:   "entry-1",
+		StartCursor: "entry-1",
 	})
 	var capture madeleine.Capture
 	decodeResult(t, start, &capture)
@@ -70,6 +69,10 @@ func TestEveryRPCMethod(t *testing.T) {
 	sealed := callRPC(t, ctx, home, "capture.seal", madeleine.SealCaptureRequest{
 		CaptureID: capture.ID,
 		EndCursor: "entry-2",
+		Transcript: &madeleine.TranscriptInput{
+			FormatVersion: madeleine.TranscriptFormatVersion,
+			Entries:       []madeleine.TranscriptEntry{{Kind: madeleine.TranscriptEntryUser, Text: "RPC evidence"}},
+		},
 	})
 	var draft madeleine.FinalizationDraft
 	decodeResult(t, sealed, &draft)
@@ -78,9 +81,10 @@ func TestEveryRPCMethod(t *testing.T) {
 	}
 
 	published := callRPC(t, ctx, home, "episode.publish", madeleine.PublishEpisodeRequest{
-		CaptureID: capture.ID,
-		L1:        "Changed a path to verify RPC dispatch.",
-		L2:        "The integration test invokes every RPC method through a fresh service.",
+		CaptureID:       capture.ID,
+		L1:              "Changed a path to verify RPC dispatch.",
+		L2:              "The integration test invokes every RPC method through a fresh service.",
+		CompactEvidence: "RPC compact evidence",
 	})
 	var episode madeleine.Episode
 	decodeResult(t, published, &episode)
@@ -101,8 +105,19 @@ func TestEveryRPCMethod(t *testing.T) {
 	})
 	var detail madeleine.EpisodeDetail
 	decodeResult(t, detailResponse, &detail)
-	if detail.EpisodeID != episode.ID {
-		t.Fatalf("detail Episode ID = %q, want %q", detail.EpisodeID, episode.ID)
+	if detail.EpisodeID != episode.ID || detail.TranscriptID != episode.TranscriptID {
+		t.Fatalf("detail = %#v, want Episode %q Transcript %q", detail, episode.ID, episode.TranscriptID)
+	}
+
+	transcriptResponse := callRPC(t, ctx, home, "transcript.get", madeleine.TranscriptRequest{
+		RepositoryRoot: repository,
+		TranscriptID:   episode.TranscriptID,
+		View:           madeleine.TranscriptViewCompact,
+	})
+	var transcript madeleine.TranscriptView
+	decodeResult(t, transcriptResponse, &transcript)
+	if transcript.Compact != "RPC compact evidence" {
+		t.Fatalf("compact Transcript = %q", transcript.Compact)
 	}
 
 	secondStart := callRPC(t, ctx, home, "capture.start", madeleine.StartCaptureRequest{

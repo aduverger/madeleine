@@ -15,12 +15,31 @@ and `raw` without depending on the original Pi session file.
 
 ## Entire reuse gate
 
-- [ ] Inspect relevant `entireio/cli` transcript compaction, storage, pagination,
+- [x] Inspect relevant `entireio/cli` transcript compaction, storage, pagination,
   and retrieval implementations and tests before coding.
-- [ ] Adapt compatible mechanics rather than rebuilding them, while preserving
+- [x] Adapt compatible mechanics rather than rebuilding them, while preserving
   Madeleine's cursor boundaries and structured-mutation policy.
-- [ ] Record upstream paths and commit, and retain required attribution.
-- [ ] Record concrete semantic mismatches for mechanics that are not reused.
+- [x] Record upstream paths and commit, and retain required attribution.
+- [x] Record concrete semantic mismatches for mechanics that are not reused.
+
+Inspected Entire commit `60773bd4b89e487a897958b00a1d168a7ea5aa01`, primarily:
+
+- `cmd/entire/cli/transcript/compact/pi.go` and `pi_test.go` for active-branch
+  selection, typed message decoding, and offset-order invariants;
+- `cmd/entire/cli/agent/pi/transcript.go` for Pi mutation extraction;
+- `cmd/entire/cli/checkpoint/persistent_compact_transcript_test.go` for durable
+  compact/full evidence behavior;
+- `cmd/entire/cli/checkpoint_api_reader.go` and `cmd/entire/cli/sessions.go` for
+  bounded transcript retrieval; and
+- `cmd/entire/cli/transcript/parse.go`, its tests, and
+  `cmd/entire/cli/integration_test/transcript_offset_test.go` for stable offset
+  behavior.
+
+Madeleine adapts the branch-before-boundary and stable-offset invariants. It does
+not reuse Entire's compact payload or Git-backed transcript storage: Entire
+retains general tool inputs/results and complete transcript files, whereas
+Madeleine deliberately stores only sanitized semantic entries in repository-
+scoped SQLite records. No copied upstream code required additional attribution.
 
 ## Files
 
@@ -37,8 +56,12 @@ harnesses/pi/transcript.ts
 harnesses/pi/summary.ts
 harnesses/pi/lifecycle.ts
 harnesses/pi/rpc.ts
+harnesses/pi/state.ts
+harnesses/pi/index.ts
+harnesses/pi/render.ts
 harnesses/pi/episode-tool.ts
 harnesses/pi/transcript-tool.ts
+harnesses/pi/package.json
 harnesses/pi/*.test.ts
 docs/design.md
 docs/plan11.md
@@ -56,24 +79,24 @@ Capture --0..1--> Transcript <--1-- Episode
 Transcript --1..n--> TranscriptEntry
 ```
 
-- [ ] Generate a UUIDv7 Transcript ID when a non-empty Capture is first sealed.
-- [ ] Add `transcripts` with Capture, Repository, Conversation, harness, format
+- [x] Generate a UUIDv7 Transcript ID when a non-empty Capture is first sealed.
+- [x] Add `transcripts` with Capture, Repository, Conversation, harness, format
   version, source start/end cursors, nullable-until-publication compact text,
   timestamps, and a unique Capture relationship.
-- [ ] Add `transcript_entries` keyed by `(transcript_id, position)` with a stable
+- [x] Add `transcript_entries` keyed by `(transcript_id, position)` with a stable
   entry kind and versioned JSON content.
-- [ ] Add `transcript_id` to Captures and Episodes; Episode publication copies
+- [x] Add `transcript_id` to Captures and Episodes; Episode publication copies
   the sealed Capture's Transcript ID.
-- [ ] Remove `transcript_ref` from Conversations, Captures, Episodes, RPC types,
+- [x] Remove `transcript_ref` from Conversations, Captures, Episodes, RPC types,
   renderers, and migrations. The application has never shipped, so edit the
   original migrations and add no compatibility migration or dual-read path.
-- [ ] Keep start/end cursors on an open or pending Capture and on its Transcript
+- [x] Keep start/end cursors on an open or pending Capture and on its Transcript
   as opaque source-boundary metadata. Episode APIs expose the Transcript ID,
   not a harness file path.
-- [ ] Use Pi's persisted session UUID (`getSessionId()`), not its session-file
+- [x] Use Pi's persisted session UUID (`getSessionId()`), not its session-file
   path, as the external Conversation ID. Ephemeral sessions retain a generated
   runtime UUID.
-- [ ] Delete Capture raw paths after Episode publication as before; retain the
+- [x] Delete Capture raw paths after Episode publication as before; retain the
   immutable Transcript and its entries with the Episode.
 
 ## Canonical bounded transcript
@@ -82,22 +105,22 @@ The Pi adapter owns Pi entry interpretation. It walks the end-to-start parent
 chain and submits only entries after the Capture start cursor through the end
 cursor.
 
-- [ ] Define a versioned structured-entry payload shared by sealing, retry,
+- [x] Define a versioned structured-entry payload shared by sealing, retry,
   summary, and retrieval.
-- [ ] Store chronological user text, assistant text, branch summaries, and
+- [x] Store chronological user text, assistant text, branch summaries, and
   structured `edit`/`write` operation, path, and success/failure metadata.
-- [ ] Retain a short bounded error for failed mutations, but omit write content,
+- [x] Retain a short bounded error for failed mutations, but omit write content,
   edit old/new text, and successful mutation result prose.
-- [ ] Exclude Pi `compaction` entries. Pi retains the original messages, and a
+- [x] Exclude Pi `compaction` entries. Pi retains the original messages, and a
   compaction may summarize ancestors outside the Capture boundary.
-- [ ] Exclude read calls and outputs, image/audio bodies, thinking, custom state,
+- [x] Exclude read calls and outputs, image/audio bodies, thinking, custom state,
   unrelated tool-result bulk, and complete Madeleine-context blocks.
-- [ ] Preserve entry kinds and sanitized mutation metadata as structured JSON
+- [x] Preserve entry kinds and sanitized mutation metadata as structured JSON
   rather than storing only one rendered prompt string.
-- [ ] Do not impose an arbitrary total transcript limit: one Capture spans a
+- [x] Do not impose an arbitrary total transcript limit: one Capture spans a
   complete session interval and may legitimately exceed a model context window.
   Bound RPC framing and retrieved pages without discarding accepted entries.
-- [ ] Mark both views as untrusted historical data at every model and tool
+- [x] Mark both views as untrusted historical data at every model and tool
   boundary.
 
 ## Raw and compact views
@@ -107,109 +130,109 @@ transcript; they are not new L3/L4 summary levels.
 
 ### Raw
 
-- [ ] Return the canonical chronological entries without Pi compaction entries.
-- [ ] Preserve the full sanitized semantic text while retaining the explicit
+- [x] Return the canonical chronological entries without Pi compaction entries.
+- [x] Preserve the full sanitized semantic text while retaining the explicit
   exclusions above; it may equal compact evidence when no chunking is needed.
-- [ ] Page by stable entry position with a bounded page size and `next_offset`.
-- [ ] Never read the original Pi JSONL file during retrieval.
+- [x] Page by stable entry position with a bounded page size and `next_offset`.
+- [x] Never read the original Pi JSONL file during retrieval.
 
 ### Compact
 
-- [ ] Render the full semantic projection using Plan 10's policy and
+- [x] Render the full semantic projection using Plan 10's policy and
   authoritative structured paths.
-- [ ] If it fits the active model, use that projection directly. Otherwise use
+- [x] If it fits the active model, use that projection directly. Otherwise use
   Plan 10's model-context-sized chronological chunk summaries and recursive
   synthesis to produce compact evidence.
-- [ ] Persist the exact final compact evidence passed to the successful L1/L2
+- [x] Persist the exact final compact evidence passed to the successful L1/L2
   model call so later retrieval shows what the summarizer saw.
-- [ ] Return compact text in one bounded response.
+- [x] Return compact text in one bounded response.
 
 ## Atomic sealing and recovery
 
-- [ ] Extend `capture.seal` to accept the versioned structured entries.
-- [ ] In one SQLite transaction, validate the open Capture, determine whether it
+- [x] Extend `capture.seal` to accept the versioned structured entries.
+- [x] In one SQLite transaction, validate the open Capture, determine whether it
   has paths, insert its Transcript and entries when non-empty, set end boundary
   and `transcript_id`, and transition to `pending_summary` or `abandoned`.
-- [ ] Discard the submitted transcript for an empty Capture.
-- [ ] Make identical seal retries idempotent. Reject a different transcript for
+- [x] Discard the submitted transcript for an empty Capture.
+- [x] Make identical seal retries idempotent. Reject a different transcript for
   an already-sealed Capture as a conflict.
-- [ ] Return `transcript_id`, paths, and status in `FinalizationDraft`.
-- [ ] Extend `episode.publish` to accept the exact compact evidence used for its
+- [x] Return `transcript_id`, paths, and status in `FinalizationDraft`.
+- [x] Extend `episode.publish` to accept the exact compact evidence used for its
   L1/L2. Store compact text, insert the Episode, and finalize the Capture in the
   existing publication transaction.
-- [ ] Make an identical publication retry succeed; reject different compact
+- [x] Make an identical publication retry succeed; reject different compact
   evidence or summaries for an already-published Episode.
-- [ ] Explicit and background retries reconstruct semantic projection from
+- [x] Explicit and background retries reconstruct semantic projection from
   persisted entries and Capture paths, then rerun Plan 10's context-sized
   compaction using the active retry model. They never read the Pi session file.
-- [ ] If projection or atomic sealing fails, keep the Capture open. If model or
+- [x] If projection or atomic sealing fails, keep the Capture open. If model or
   publication fails after sealing, keep the raw Transcript pending; compact text
   becomes immutable only when Episode publication succeeds.
 
 ## Retrieval API and Pi tool
 
-- [ ] Add repository-scoped `transcript.get` with Transcript ID, view, and raw
+- [x] Add repository-scoped `transcript.get` with Transcript ID, view, and raw
   page offset parameters.
-- [ ] Verify the Transcript belongs to the resolved Repository before returning
+- [x] Verify the Transcript belongs to the resolved Repository before returning
   any content.
-- [ ] Return compact text or a page of typed raw entries plus `next_offset`.
-- [ ] Include `transcript_id` in Episode detail and remove transcript reference
+- [x] Return compact text or a page of typed raw entries plus `next_offset`.
+- [x] Include `transcript_id` in Episode detail and remove transcript reference
   and cursor presentation from `madeleine_episode`.
-- [ ] Add `madeleine_transcript { transcript_id, view, offset? }`.
-- [ ] Keep `view` strict to `compact | raw`; default to `compact` only if the
+- [x] Add `madeleine_transcript { transcript_id, view, offset? }`.
+- [x] Keep `view` strict to `compact | raw`; default to `compact` only if the
   TypeBox schema can express that without compatibility ambiguity.
-- [ ] Use Pi's standard tool-output truncation as a final safety bound. Raw
+- [x] Use Pi's standard tool-output truncation as a final safety bound. Raw
   pagination must normally keep each response below that limit.
-- [ ] Return repository-safe errors without leaking database paths or another
+- [x] Return repository-safe errors without leaking database paths or another
   Repository's Transcript existence.
 
 ## Summary integration
 
-- [ ] Keep Plan 10's strict final L1/L2 JSON contract, semantic projection, and
+- [x] Keep Plan 10's strict final L1/L2 JSON contract, semantic projection, and
   active-model chunking unchanged.
-- [ ] Include authoritative Capture paths returned by sealing before deciding
+- [x] Include authoritative Capture paths returned by sealing before deciding
   whether projection requires intermediate compaction.
-- [ ] Publish the exact final evidence given to the successful L1/L2 call as the
+- [x] Publish the exact final evidence given to the successful L1/L2 call as the
   Transcript's compact view.
-- [ ] Do not store prompt instructions, model identity, raw model response,
+- [x] Do not store prompt instructions, model identity, raw model response,
   discarded intermediate hierarchy levels, or hidden reasoning in Transcript
   records. The final combined segment summaries remain part of compact evidence.
-- [ ] Treat an existing identical Episode publication as success.
+- [x] Treat an existing identical Episode publication as success.
 
 ## Tests
 
-- [ ] Schema has Transcript ownership and no `transcript_ref` columns.
-- [ ] Pi session UUID Conversation identity survives reload and resume without a
+- [x] Schema has Transcript ownership and no `transcript_ref` columns.
+- [x] Pi session UUID Conversation identity survives reload and resume without a
   session-file path.
-- [ ] Linear and forked cursor ranges persist only the selected Capture interval.
-- [ ] Raw view excludes compaction entries but retains original messages across
+- [x] Linear and forked cursor ranges persist only the selected Capture interval.
+- [x] Raw view excludes compaction entries but retains original messages across
   a compaction.
-- [ ] Branch summaries are retained without traversing abandoned raw branches.
-- [ ] Read calls/output, edit/write bodies, successful result prose, binary
+- [x] Branch summaries are retained without traversing abandoned raw branches.
+- [x] Read calls/output, edit/write bodies, successful result prose, binary
   content, custom state, thinking, and recursive Madeleine context are excluded.
-- [ ] Atomic seal success, empty abandonment, identical retry, conflicting
+- [x] Atomic seal success, empty abandonment, identical retry, conflicting
   retry, large session-scale transcript, and transaction rollback.
-- [ ] Crash after sealing recovers from persisted entries and paths without the
+- [x] Crash after sealing recovers from persisted entries and paths without the
   Pi session file.
-- [ ] The evidence portion of the successful final summary prompt exactly
+- [x] The evidence portion of the successful final summary prompt exactly
   equals persisted compact text.
-- [ ] Summary and publish failures leave Transcript-linked pending Captures.
-- [ ] Retry succeeds after deleting or moving the original Pi session file.
-- [ ] Compact retrieval, multi-page raw retrieval, invalid offset/view, missing
+- [x] Summary and publish failures leave Transcript-linked pending Captures.
+- [x] Retry succeeds after deleting or moving the original Pi session file.
+- [x] Compact retrieval, multi-page raw retrieval, invalid offset/view, missing
   Transcript, and cross-Repository denial.
-- [ ] `madeleine_episode` exposes Transcript ID and
+- [x] `madeleine_episode` exposes Transcript ID and
   `madeleine_transcript` renders both untrusted views within Pi output bounds.
 
 ## Acceptance criteria
 
-- [ ] Every published Episode references one immutable bounded Transcript.
-- [ ] The agent can retrieve compact evidence and page through raw evidence for
+- [x] Every published Episode references one immutable bounded Transcript.
+- [x] The agent can retrieve compact evidence and page through raw evidence for
   an Episode without accessing a Pi session file.
-- [ ] The compact evidence is byte-for-byte the source used for L1/L2.
-- [ ] No Pi compaction summary can introduce pre-Capture Conversation content.
-- [ ] A chunk, summary, or publication failure preserves all data required for
+- [x] The compact evidence is byte-for-byte the source used for L1/L2.
+- [x] No Pi compaction summary can introduce pre-Capture Conversation content.
+- [x] A chunk, summary, or publication failure preserves all data required for
   retry in SQLite.
-- [ ] No database or public RPC response stores or exposes a transcript file
+- [x] No database or public RPC response stores or exposes a transcript file
   path.
 
 ## Excluded from this PR
@@ -219,31 +242,61 @@ outputs, semantic transcript search, transcript mutation, transcript deletion
 UI, cross-repository retrieval, other harness adapters, and generated L3/L4
 summaries.
 
+## Implementation outcome
+
+Plan 11 is implemented. A non-empty seal now atomically stores a generated
+Transcript and its structured entries. Summary and retry paths page those SQLite
+entries, render the authoritative Capture paths, and publish the exact final
+model evidence with the Episode in one transaction. Pi exposes repository-safe
+compact and raw retrieval without retaining a session-file reference.
+
 ## Plan revisions and decision ledger
 
 Listed least-confident first:
 
-1. "Raw" means the fullest persisted Madeleine semantic evidence view, not a
+1. Raw retrieval uses a fixed 50-entry page. A negative offset, a compact-view
+   offset, or a positive offset beyond the available entries is invalid. The
+   page size bounds ordinary RPC responses without introducing a caller-tunable
+   protocol surface. The local child-process transport permits at most 16 MiB
+   so context-sized compact evidence can reach the adapter; Pi's standard
+   50KB/2000-line truncation remains the final tool-output bound.
+2. Mutation entries are emitted when an `edit` or `write` tool result matches a
+   bounded-branch tool call. This stores operation, path, and success/failure at
+   the chronological result position; incomplete calls without a result are
+   omitted because their outcome is unknown.
+3. Abandoning a sealed pending Capture deletes its unpublished Transcript after
+   clearing the Capture relationship. Published Transcripts remain immutable;
+   the existing abandon command continues to mean deleting unfinished data.
+4. `madeleine_transcript.view` is optional with a TypeBox default of `compact`.
+   `raw` must be selected explicitly before an offset is accepted.
+5. Transcript tables and relationships were added by editing the original
+   migrations because the application has never shipped. No compatibility
+   migration, dual-read, or legacy file-reference field remains.
+6. The persisted Transcript payload is harness-agnostic Madeleine-domain data.
+   Pi owns only the translation from Pi session entries; future Claude Code,
+   Codex, or other adapters submit and retrieve the same canonical entry kinds,
+   so history can cross harness boundaries.
+7. "Raw" means the fullest persisted Madeleine semantic evidence view, not a
    byte copy of Pi's JSONL. It deliberately excludes reads, file-content tool
    payloads, successful result prose, and privileged/internal content that do
    not improve file-intent evidence. User, assistant, and branch-summary text
    remain complete even when the session exceeds a model context window.
-2. No arbitrary total storage limit is planned. Cursor bounds and semantic
+8. No arbitrary total storage limit is planned. Cursor bounds and semantic
    filtering define Transcript scope; model context limits define chunk size,
    while RPC framing and retrieval pagination bound individual operations.
-3. Compact text is stored in addition to structured entries. It may contain
+9. Compact text is stored in addition to structured entries. It may contain
    Capture-specific model-generated chunk summaries, so it is not
    deterministically derivable. Persisting it proves exactly what the final
    summary model saw and prevents a later attempt or renderer change from
    rewriting a published Episode's evidence.
-4. Structured Transcript insertion is part of `capture.seal`, rather than a
+10. Structured Transcript insertion is part of `capture.seal`, rather than a
    separate `transcript.put` followed by sealing. Compact evidence is stored
    atomically with Episode publication, avoiding a separate mutable
    `prepare_compact` state while keeping every failed attempt recoverable from
    raw SQLite entries.
-5. Pi compaction summaries are excluded from both views. The append-only raw
+11. Pi compaction summaries are excluded from both views. The append-only raw
    messages remain available, while the summary's semantic start boundary is
    not reliably limited to the Capture start cursor.
-6. The existing recovery/MVP plan was moved from Plan 11 to Plan 12 so final
+12. The existing recovery/MVP plan was moved from Plan 11 to Plan 12 so final
    end-to-end hardening validates persisted evidence rather than immediately
    obsolete transcript references.

@@ -24,22 +24,13 @@ func (tx *Tx) FindConversationID(ctx context.Context, repositoryID, harness, ext
 
 func (tx *Tx) InsertConversation(
 	ctx context.Context,
-	id, repositoryID, harness, externalID, transcriptRef string,
+	id, repositoryID, harness, externalID string,
 	createdAt time.Time,
 ) error {
-	storedTranscriptRef := sql.NullString{String: transcriptRef, Valid: transcriptRef != ""}
 	_, err := tx.tx.ExecContext(ctx, `
 		INSERT INTO conversations(
-			id, repository_id, harness, external_id, transcript_ref, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id, repositoryID, harness, externalID, storedTranscriptRef,
-		timestamp(createdAt), timestamp(createdAt))
-	return err
-}
-
-func (tx *Tx) UpdateConversationTranscript(ctx context.Context, id, transcriptRef string, updatedAt time.Time) error {
-	_, err := tx.tx.ExecContext(ctx, `
-		UPDATE conversations SET transcript_ref = ?, updated_at = ? WHERE id = ?`,
-		transcriptRef, timestamp(updatedAt), id)
+			id, repository_id, harness, external_id, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?)`,
+		id, repositoryID, harness, externalID, timestamp(createdAt), timestamp(createdAt))
 	return err
 }

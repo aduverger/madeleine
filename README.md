@@ -82,8 +82,11 @@ Episode context is disclosed in layers:
 4. **Raw Transcript** — the fuller sanitized, cursor-bounded semantic entries,
    available in pages.
 
-Madeleine persists both Transcript views by generated ID. It does not depend on
-or expose the original harness transcript-file path.
+Madeleine persists both Transcript views by generated ID. Their entry format is
+owned by Madeleine rather than Pi, Claude Code, Codex, or another harness. Each
+adapter translates its native transcript into the same canonical representation,
+so Episode summaries and Transcript evidence can be consumed across harnesses.
+Madeleine does not depend on or expose the original harness transcript-file path.
 
 The default lookup is intentionally deterministic: the five newest Episodes for
 the exact path, newest first. The model decides which history matters.

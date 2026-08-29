@@ -11,7 +11,7 @@ import (
 const captureSelect = `
 	SELECT c.id, c.repository_id, c.conversation_id,
 		conversation.harness, conversation.external_id,
-		c.worktree_root, c.status, c.transcript_ref,
+		c.worktree_root, c.status, c.transcript_id,
 		c.start_cursor, c.end_cursor, c.started_at, c.ended_at,
 		c.last_seen_at, c.episode_id
 	FROM captures c
@@ -36,15 +36,13 @@ func (tx *Tx) FindOpenCaptureID(ctx context.Context, conversationID, openStatus 
 }
 
 func (tx *Tx) InsertCapture(ctx context.Context, record CaptureRecord) error {
-	transcriptRef := sql.NullString{String: record.TranscriptRef, Valid: record.TranscriptRef != ""}
 	_, err := tx.tx.ExecContext(ctx, `
 		INSERT INTO captures(
 			id, conversation_id, repository_id, worktree_root, status,
-			transcript_ref, start_cursor, started_at, last_seen_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			start_cursor, started_at, last_seen_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		record.ID, record.ConversationID, record.RepositoryID, record.WorktreeRoot,
-		record.Status, transcriptRef, record.StartCursor, timestamp(record.StartedAt),
-		timestamp(record.LastSeenAt))
+		record.Status, record.StartCursor, timestamp(record.StartedAt), timestamp(record.LastSeenAt))
 	return err
 }
 
@@ -143,13 +141,14 @@ func (tx *Tx) CapturePaths(ctx context.Context, captureID string) ([]string, err
 
 func (tx *Tx) SealCapture(
 	ctx context.Context,
-	captureID, expectedStatus, nextStatus, endCursor string,
+	captureID, expectedStatus, nextStatus, endCursor, transcriptID string,
 	endedAt time.Time,
 ) (bool, error) {
+	storedTranscriptID := sql.NullString{String: transcriptID, Valid: transcriptID != ""}
 	result, err := tx.tx.ExecContext(ctx, `
-		UPDATE captures SET status = ?, end_cursor = ?, ended_at = ?
+		UPDATE captures SET status = ?, end_cursor = ?, transcript_id = ?, ended_at = ?
 		WHERE id = ? AND status = ?`,
-		nextStatus, endCursor, timestamp(endedAt), captureID, expectedStatus)
+		nextStatus, endCursor, storedTranscriptID, timestamp(endedAt), captureID, expectedStatus)
 	if err != nil {
 		return false, err
 	}
@@ -185,7 +184,7 @@ func (tx *Tx) FinalizeCapture(
 	return oneRowAffected(result)
 }
 
-func (tx *Tx) DeleteCaptureRawState(ctx context.Context, captureID string) error {
+func (tx *Tx) DeleteCapturePaths(ctx context.Context, captureID string) error {
 	_, err := tx.tx.ExecContext(ctx,
 		"DELETE FROM capture_paths WHERE capture_id = ?", captureID)
 	return err
@@ -198,12 +197,12 @@ func oneRowAffected(result sql.Result) (bool, error) {
 
 func scanCapture(source scanner) (CaptureRecord, error) {
 	var capture CaptureRecord
-	var transcriptRef, startCursor, endCursor, endedAt, episodeID sql.NullString
+	var transcriptID, startCursor, endCursor, endedAt, episodeID sql.NullString
 	var startedAt, lastSeenAt string
 	if err := source.Scan(
 		&capture.ID, &capture.RepositoryID, &capture.ConversationID,
 		&capture.Harness, &capture.ExternalID,
-		&capture.WorktreeRoot, &capture.Status, &transcriptRef,
+		&capture.WorktreeRoot, &capture.Status, &transcriptID,
 		&startCursor, &endCursor, &startedAt, &endedAt, &lastSeenAt, &episodeID,
 	); err != nil {
 		return CaptureRecord{}, err
@@ -225,7 +224,7 @@ func scanCapture(source scanner) (CaptureRecord, error) {
 		}
 		capture.EndedAt = &value
 	}
-	capture.TranscriptRef = transcriptRef.String
+	capture.TranscriptID = transcriptID.String
 	capture.StartCursor = startCursor.String
 	capture.EndCursor = endCursor.String
 	capture.EpisodeID = episodeID.String

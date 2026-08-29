@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   maxMutationErrorCharacters,
+  extractCaptureTranscript,
   projectCaptureTranscript,
   stripMadeleineContext,
 } from "./transcript.ts";
@@ -54,7 +55,7 @@ function toolResult(
 ): SessionEntry {
   return entry(id, parentId, {
     role: "toolResult",
-    toolCallId: `call-${id}`,
+    toolCallId: toolName,
     toolName,
     content: [{ type: "text", text }],
     isError,
@@ -163,7 +164,8 @@ describe("projectCaptureTranscript", () => {
       ]),
       toolResult("read-result", "calls", "read", "large secret output"),
       toolResult("write-result", "read-result", "write", "successful write result prose"),
-      entry("image", "write-result", {
+      toolResult("edit-result", "write-result", "edit", "successful edit result prose"),
+      entry("image", "edit-result", {
         role: "user",
         content: [{ type: "image", data: "base64-payload", mimeType: "image/png" }],
         timestamp: 0,
@@ -171,9 +173,8 @@ describe("projectCaptureTranscript", () => {
     ];
 
     const projection = projectCaptureTranscript(entries, "start", "image", ["src/a.ts"]);
-    expect(projection).toContain("[Mutation write]\nPath: src/a.ts");
-    expect(projection).toContain("[Mutation edit]\nPath: src/b.ts");
-    expect(projection).toContain("[Mutation result write: success]");
+    expect(projection).toContain("[Mutation write: success]\nPath: src/a.ts");
+    expect(projection).toContain("[Mutation edit: success]\nPath: src/b.ts");
     expect(projection).not.toContain("secret.txt");
     expect(projection).not.toContain("distinctive-write-payload");
     expect(projection).not.toContain("distinctive-old-text");
@@ -187,13 +188,35 @@ describe("projectCaptureTranscript", () => {
     const error = `permission denied ${"x".repeat(maxMutationErrorCharacters)}`;
     const entries = [
       custom("start", null),
-      toolResult("failure", "start", "edit", error, true),
+      assistant("call", "start", [
+        { type: "toolCall", id: "edit", name: "edit", arguments: { path: "src/a.ts" } },
+      ]),
+      toolResult("failure", "call", "edit", error, true),
     ];
 
     const projection = projectCaptureTranscript(entries, "start", "failure", []);
-    expect(projection).toContain("[Mutation result edit: failure]\npermission denied");
+    expect(projection).toContain("[Mutation edit: failure]\nPath: src/a.ts\npermission denied");
     expect(projection).toContain("… [truncated]");
     expect(projection).not.toContain(error);
+  });
+
+  it("returns versioned structured entries for sealing and retry", () => {
+    const entries = [
+      custom("start", null),
+      user("goal", "start", "change a file"),
+      assistant("call", "goal", [
+        { type: "toolCall", id: "write", name: "write", arguments: { path: "src/a.ts", content: "secret" } },
+      ]),
+      toolResult("result", "call", "write", "written"),
+    ];
+
+    expect(extractCaptureTranscript(entries, "start", "result")).toEqual({
+      format_version: 1,
+      entries: [
+        { kind: "user", text: "change a file" },
+        { kind: "mutation", operation: "write", path: "src/a.ts", status: "success" },
+      ],
+    });
   });
 
   it("recursively removes complete Madeleine context blocks", () => {

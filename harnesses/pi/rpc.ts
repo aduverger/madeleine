@@ -1,8 +1,10 @@
 import { spawn } from "node:child_process";
 
+import type { TranscriptEntry, TranscriptInput } from "./transcript.ts";
+
 const protocolVersion = 1;
 const defaultTimeoutMs = 2_000;
-const defaultMaxOutputBytes = 1024 * 1024;
+const defaultMaxOutputBytes = 16 * 1024 * 1024;
 
 export type AdapterErrorKind =
   | "unavailable"
@@ -51,7 +53,7 @@ export interface Capture {
   conversation_key: { harness: string; external_id: string };
   worktree_root: string;
   status: CaptureStatus;
-  transcript_ref?: string;
+  transcript_id?: string;
   start_cursor: string;
   end_cursor?: string;
   started_at: string;
@@ -62,6 +64,7 @@ export interface Capture {
 
 export interface FinalizationDraft {
   capture_id: string;
+  transcript_id?: string;
   status: CaptureStatus;
   empty: boolean;
   paths: string[];
@@ -78,9 +81,7 @@ export interface Episode {
   paths: string[];
   l1: string;
   l2: string;
-  transcript_ref?: string;
-  start_cursor: string;
-  end_cursor: string;
+  transcript_id: string;
   started_at: string;
   ended_at: string;
   created_at: string;
@@ -92,9 +93,17 @@ export interface EpisodeDetail {
   paths: string[];
   l1: string;
   l2: string;
-  transcript_ref?: string;
+  transcript_id: string;
   started_at: string;
   ended_at: string;
+}
+
+export interface TranscriptView {
+  transcript_id: string;
+  view: "compact" | "raw";
+  compact?: string;
+  entries?: TranscriptEntry[];
+  next_offset?: number;
 }
 
 interface ProcessResult {
@@ -164,7 +173,6 @@ export class RPCClient {
   async startCapture(
     repositoryRoot: string,
     externalID: string,
-    transcriptRef: string,
     startCursor: string,
     signal?: AbortSignal,
   ): Promise<Capture> {
@@ -173,7 +181,6 @@ export class RPCClient {
       {
         repository_root: repositoryRoot,
         conversation_key: { harness: "pi", external_id: externalID },
-        transcript_ref: transcriptRef,
         start_cursor: startCursor,
       },
       validateCapture,
@@ -213,11 +220,12 @@ export class RPCClient {
   async sealCapture(
     captureID: string,
     endCursor: string,
+    transcript?: TranscriptInput,
     signal?: AbortSignal,
   ): Promise<FinalizationDraft> {
     return this.call(
       "capture.seal",
-      { capture_id: captureID, end_cursor: endCursor },
+      { capture_id: captureID, end_cursor: endCursor, transcript },
       validateFinalizationDraft,
       signal,
     );
@@ -227,12 +235,28 @@ export class RPCClient {
     captureID: string,
     l1: string,
     l2: string,
+    compactEvidence: string,
     signal?: AbortSignal,
   ): Promise<Episode> {
     return this.call(
       "episode.publish",
-      { capture_id: captureID, l1, l2 },
+      { capture_id: captureID, l1, l2, compact_evidence: compactEvidence },
       validateEpisode,
+      signal,
+    );
+  }
+
+  async getTranscript(
+    repositoryRoot: string,
+    transcriptID: string,
+    view: "compact" | "raw",
+    offset = 0,
+    signal?: AbortSignal,
+  ): Promise<TranscriptView> {
+    return this.call(
+      "transcript.get",
+      { repository_root: repositoryRoot, transcript_id: transcriptID, view, offset },
+      validateTranscriptView,
       signal,
     );
   }
@@ -412,7 +436,7 @@ function validateCapture(value: unknown): Capture {
     !isConversationKey(value.conversation_key) ||
     typeof value.worktree_root !== "string" ||
     !isCaptureStatus(value.status) ||
-    (value.transcript_ref !== undefined && typeof value.transcript_ref !== "string") ||
+    (value.transcript_id !== undefined && typeof value.transcript_id !== "string") ||
     typeof value.start_cursor !== "string" ||
     (value.end_cursor !== undefined && typeof value.end_cursor !== "string") ||
     typeof value.started_at !== "string" ||
@@ -434,6 +458,7 @@ function validateFinalizationDraft(value: unknown): FinalizationDraft {
   if (
     !isObject(value) ||
     typeof value.capture_id !== "string" ||
+    (value.transcript_id !== undefined && typeof value.transcript_id !== "string") ||
     !isCaptureStatus(value.status) ||
     typeof value.empty !== "boolean" ||
     !isStringArray(value.paths) ||
@@ -472,9 +497,7 @@ function validateEpisode(value: unknown): Episode {
     !isStringArray(value.paths) ||
     typeof value.l1 !== "string" ||
     typeof value.l2 !== "string" ||
-    (value.transcript_ref !== undefined && typeof value.transcript_ref !== "string") ||
-    typeof value.start_cursor !== "string" ||
-    typeof value.end_cursor !== "string" ||
+    typeof value.transcript_id !== "string" ||
     typeof value.started_at !== "string" ||
     typeof value.ended_at !== "string" ||
     typeof value.created_at !== "string"
@@ -492,13 +515,44 @@ function validateEpisodeDetail(value: unknown): EpisodeDetail {
     !isStringArray(value.paths) ||
     typeof value.l1 !== "string" ||
     typeof value.l2 !== "string" ||
-    (value.transcript_ref !== undefined && typeof value.transcript_ref !== "string") ||
+    typeof value.transcript_id !== "string" ||
     typeof value.started_at !== "string" ||
     typeof value.ended_at !== "string"
   ) {
     throw invalidResult();
   }
   return value as unknown as EpisodeDetail;
+}
+
+function validateTranscriptView(value: unknown): TranscriptView {
+  if (
+    !isObject(value) ||
+    typeof value.transcript_id !== "string" ||
+    (value.view !== "compact" && value.view !== "raw") ||
+    (value.compact !== undefined && typeof value.compact !== "string") ||
+    (value.entries !== undefined && (!Array.isArray(value.entries) || !value.entries.every(isTranscriptEntry))) ||
+    (value.next_offset !== undefined &&
+      (!Number.isInteger(value.next_offset) || (value.next_offset as number) < 0))
+  ) {
+    throw invalidResult();
+  }
+  if (value.view === "compact" && typeof value.compact !== "string") throw invalidResult();
+  if (value.view === "raw" && !Array.isArray(value.entries)) throw invalidResult();
+  return value as unknown as TranscriptView;
+}
+
+function isTranscriptEntry(value: unknown): value is TranscriptEntry {
+  if (!isObject(value)) return false;
+  if (["user", "assistant", "branch_summary"].includes(value.kind as string)) {
+    return typeof value.text === "string";
+  }
+  return (
+    value.kind === "mutation" &&
+    (value.operation === "edit" || value.operation === "write") &&
+    typeof value.path === "string" &&
+    (value.status === "success" || value.status === "failure") &&
+    (value.error === undefined || typeof value.error === "string")
+  );
 }
 
 function invalidResult(): AdapterError {

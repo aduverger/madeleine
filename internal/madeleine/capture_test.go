@@ -66,7 +66,6 @@ func TestStartAndGetCapture(t *testing.T) {
 	request := StartCaptureRequest{
 		RepositoryRoot:  root,
 		ConversationKey: ConversationKey{Harness: HarnessPi, ExternalID: "session-start"},
-		TranscriptRef:   "session.jsonl",
 		StartCursor:     "entry-10",
 	}
 
@@ -107,7 +106,6 @@ func TestConcurrentStartCaptureAllowsOneOpenCapture(t *testing.T) {
 	request := StartCaptureRequest{
 		RepositoryRoot:  root,
 		ConversationKey: ConversationKey{Harness: HarnessPi, ExternalID: "racing-session"},
-		TranscriptRef:   "session.jsonl",
 		StartCursor:     "start",
 	}
 
@@ -358,12 +356,14 @@ func TestSealCaptureOrdersPathsAndIsIdempotent(t *testing.T) {
 		}
 	}
 
-	first, err := store.SealCapture(context.Background(), SealCaptureRequest{CaptureID: capture.ID, EndCursor: "end-1"})
+	first, err := store.SealCapture(context.Background(), SealCaptureRequest{
+		CaptureID: capture.ID, EndCursor: "end-1", Transcript: testTranscriptInput(),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	wantPaths := []string{"a.go", "nested/m.go", "z.go"}
-	if first.Status != CaptureStatusPendingSummary || first.Empty || !reflect.DeepEqual(first.Paths, wantPaths) {
+	if first.Status != CaptureStatusPendingSummary || first.Empty || first.TranscriptID == "" || !reflect.DeepEqual(first.Paths, wantPaths) {
 		t.Fatalf("first draft = %#v, want ordered pending draft %v", first, wantPaths)
 	}
 	sealed, err := store.GetCapture(context.Background(), capture.ID)
@@ -374,12 +374,29 @@ func TestSealCaptureOrdersPathsAndIsIdempotent(t *testing.T) {
 		t.Fatalf("sealed Capture boundaries = %#v", sealed)
 	}
 
-	second, err := store.SealCapture(context.Background(), SealCaptureRequest{CaptureID: capture.ID, EndCursor: "end-2"})
+	second, err := store.SealCapture(context.Background(), SealCaptureRequest{
+		CaptureID: capture.ID, EndCursor: "end-1", Transcript: testTranscriptInput(),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(second, first) {
 		t.Fatalf("repeated draft = %#v, want %#v", second, first)
+	}
+	if _, err := store.SealCapture(context.Background(), SealCaptureRequest{
+		CaptureID: capture.ID, EndCursor: "end-2", Transcript: testTranscriptInput(),
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("conflicting boundary error = %v, want ErrConflict", err)
+	}
+	if _, err := store.SealCapture(context.Background(), SealCaptureRequest{
+		CaptureID: capture.ID,
+		EndCursor: "end-1",
+		Transcript: &TranscriptInput{
+			FormatVersion: TranscriptFormatVersion,
+			Entries:       []TranscriptEntry{{Kind: TranscriptEntryUser, Text: "Different evidence"}},
+		},
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("conflicting Transcript error = %v, want ErrConflict", err)
 	}
 	repeated, err := store.GetCapture(context.Background(), capture.ID)
 	if err != nil {
@@ -416,7 +433,7 @@ func TestSealCaptureIgnoresUnrecordedFilesystemChanges(t *testing.T) {
 	}
 }
 
-func TestSealEmptyAndFinalizedCapturesIsIdempotent(t *testing.T) {
+func TestSealEmptyCaptureIsIdempotent(t *testing.T) {
 	t.Parallel()
 
 	store := openTestStore(t, t.TempDir())
@@ -424,7 +441,9 @@ func TestSealEmptyAndFinalizedCapturesIsIdempotent(t *testing.T) {
 	root := newTestGitRepository(t, "")
 
 	emptyCapture := startTestCapture(t, store, root, "empty-seal")
-	first, err := store.SealCapture(context.Background(), SealCaptureRequest{CaptureID: emptyCapture.ID, EndCursor: "end"})
+	first, err := store.SealCapture(context.Background(), SealCaptureRequest{
+		CaptureID: emptyCapture.ID, EndCursor: "end", Transcript: testTranscriptInput(),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,27 +464,12 @@ func TestSealEmptyAndFinalizedCapturesIsIdempotent(t *testing.T) {
 	if terminalRows != 1 {
 		t.Fatalf("terminal Capture rows = %d, want 1", terminalRows)
 	}
-
-	finalized := startTestCapture(t, store, root, "finalized-seal")
-	if _, err := store.db.Exec(`
-		UPDATE captures SET status = ?, episode_id = ?, end_cursor = ?, ended_at = ? WHERE id = ?`,
-		CaptureStatusFinalized, "episode-1", "original-end", utcTimestamp(), finalized.ID,
-	); err != nil {
+	var transcriptRows int
+	if err := store.db.QueryRow("SELECT COUNT(*) FROM transcripts WHERE capture_id = ?", emptyCapture.ID).Scan(&transcriptRows); err != nil {
 		t.Fatal(err)
 	}
-	draft, err := store.SealCapture(context.Background(), SealCaptureRequest{CaptureID: finalized.ID, EndCursor: "new-end"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if draft.Status != CaptureStatusFinalized || draft.EpisodeID != "episode-1" {
-		t.Fatalf("finalized draft = %#v", draft)
-	}
-	got, err := store.GetCapture(context.Background(), finalized.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.EndCursor != "original-end" {
-		t.Fatalf("finalized seal changed end cursor to %q", got.EndCursor)
+	if transcriptRows != 0 {
+		t.Fatalf("empty Capture Transcript rows = %d, want 0", transcriptRows)
 	}
 }
 
@@ -479,7 +483,9 @@ func TestAbandonCaptureDeletesPathsAndKeepsTerminalRow(t *testing.T) {
 	if err := store.RecordWrite(context.Background(), RecordWriteRequest{CaptureID: capture.ID, Path: "file.go"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SealCapture(context.Background(), SealCaptureRequest{CaptureID: capture.ID, EndCursor: "end"}); err != nil {
+	if _, err := store.SealCapture(context.Background(), SealCaptureRequest{
+		CaptureID: capture.ID, EndCursor: "end", Transcript: testTranscriptInput(),
+	}); err != nil {
 		t.Fatal(err)
 	}
 	sealed, err := store.GetCapture(context.Background(), capture.ID)
@@ -503,15 +509,18 @@ func TestAbandonCaptureDeletesPathsAndKeepsTerminalRow(t *testing.T) {
 	if !got.EndedAt.Equal(*sealed.EndedAt) {
 		t.Fatalf("abandon changed sealed end time from %v to %v", sealed.EndedAt, got.EndedAt)
 	}
-	var captureCount, pathCount int
+	var captureCount, pathCount, transcriptCount int
 	if err := store.db.QueryRow("SELECT COUNT(*) FROM captures WHERE id = ?", capture.ID).Scan(&captureCount); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.db.QueryRow("SELECT COUNT(*) FROM capture_paths WHERE capture_id = ?", capture.ID).Scan(&pathCount); err != nil {
 		t.Fatal(err)
 	}
-	if captureCount != 1 || pathCount != 0 {
-		t.Fatalf("Capture/path rows = %d/%d, want 1/0", captureCount, pathCount)
+	if err := store.db.QueryRow("SELECT COUNT(*) FROM transcripts WHERE capture_id = ?", capture.ID).Scan(&transcriptCount); err != nil {
+		t.Fatal(err)
+	}
+	if captureCount != 1 || pathCount != 0 || transcriptCount != 0 {
+		t.Fatalf("Capture/path/Transcript rows = %d/%d/%d, want 1/0/0", captureCount, pathCount, transcriptCount)
 	}
 
 	finalized := startTestCapture(t, store, root, "abandon-finalized")
@@ -540,7 +549,9 @@ func TestListPendingCapturesIsIsolatedAndOldestFirst(t *testing.T) {
 	if err := store.RecordWrite(context.Background(), RecordWriteRequest{CaptureID: pendingA.ID, Path: "a.go"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SealCapture(context.Background(), SealCaptureRequest{CaptureID: pendingA.ID, EndCursor: "end"}); err != nil {
+	if _, err := store.SealCapture(context.Background(), SealCaptureRequest{
+		CaptureID: pendingA.ID, EndCursor: "end", Transcript: testTranscriptInput(),
+	}); err != nil {
 		t.Fatal(err)
 	}
 	openA := startCaptureWithKey(t, store, firstRoot, keyA)
@@ -619,7 +630,9 @@ func TestOpenCaptureAndPathsSurviveStoreReopen(t *testing.T) {
 	if got.Status != CaptureStatusOpen {
 		t.Fatalf("reopened status = %q, want open", got.Status)
 	}
-	draft, err := reopened.SealCapture(context.Background(), SealCaptureRequest{CaptureID: capture.ID, EndCursor: "recovered-end"})
+	draft, err := reopened.SealCapture(context.Background(), SealCaptureRequest{
+		CaptureID: capture.ID, EndCursor: "recovered-end", Transcript: testTranscriptInput(),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -638,13 +651,19 @@ func startCaptureWithKey(t *testing.T, store *testService, root string, key Conv
 	capture, err := store.StartCapture(context.Background(), StartCaptureRequest{
 		RepositoryRoot:  root,
 		ConversationKey: key,
-		TranscriptRef:   key.ExternalID + ".jsonl",
 		StartCursor:     "start",
 	})
 	if err != nil {
 		t.Fatalf("StartCapture: %v", err)
 	}
 	return capture
+}
+
+func testTranscriptInput() *TranscriptInput {
+	return &TranscriptInput{
+		FormatVersion: TranscriptFormatVersion,
+		Entries:       []TranscriptEntry{{Kind: TranscriptEntryUser, Text: "Test Capture evidence"}},
+	}
 }
 
 func mustParseTime(t *testing.T, value string) time.Time {

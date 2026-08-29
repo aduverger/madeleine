@@ -13,6 +13,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { Capture, FinalizationDraft } from "./rpc.ts";
+import { extractCaptureTranscript, type TranscriptInput } from "./transcript.ts";
 import { PiState, type ConversationIdentity } from "./state.ts";
 import {
   EpisodeFinalizer,
@@ -54,7 +55,6 @@ export interface CaptureClient extends SummaryClient {
   startCapture(
     repositoryRoot: string,
     externalID: string,
-    transcriptRef: string,
     startCursor: string,
     signal?: AbortSignal,
   ): Promise<Capture>;
@@ -65,7 +65,12 @@ export interface CaptureClient extends SummaryClient {
     signal?: AbortSignal,
   ): Promise<Capture[]>;
   recordWrite(captureID: string, path: string, signal?: AbortSignal): Promise<void>;
-  sealCapture(captureID: string, endCursor: string, signal?: AbortSignal): Promise<FinalizationDraft>;
+  sealCapture(
+    captureID: string,
+    endCursor: string,
+    transcript?: TranscriptInput,
+    signal?: AbortSignal,
+  ): Promise<FinalizationDraft>;
 }
 
 export class CaptureLifecycle {
@@ -204,7 +209,6 @@ export class CaptureLifecycle {
     const capture = await this.client.startCapture(
       this.repositoryRoot,
       this.conversation.externalID,
-      this.conversation.transcriptRef,
       this.state.ensureCursor(ctx),
       this.workController.signal,
     );
@@ -287,7 +291,14 @@ export class CaptureLifecycle {
     captureID: string,
     ctx: ExtensionContext,
   ): Promise<FinalizationOutcome> {
-    const draft = await this.client.sealCapture(captureID, this.state.ensureCursor(ctx));
+    const endCursor = this.state.ensureCursor(ctx);
+    const capture = await this.client.getCapture(captureID, ctx.signal);
+    const transcript = extractCaptureTranscript(
+      ctx.sessionManager.getEntries(),
+      capture.start_cursor,
+      endCursor,
+    );
+    const draft = await this.client.sealCapture(captureID, endCursor, transcript, ctx.signal);
     this.clearCurrentCapture(captureID);
     try {
       return await this.finalizer.finalize(draft, ctx, ctx.signal);

@@ -5,7 +5,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { Capture, Episode, FinalizationDraft } from "./rpc.ts";
+import type { Episode, FinalizationDraft, TranscriptView } from "./rpc.ts";
 import {
   EpisodeFinalizer,
   generateSummary,
@@ -65,26 +65,10 @@ function context(options: {
       hasConfiguredAuth: () => options.authenticated ?? true,
       complete,
     },
+    cwd: "/repo",
     sessionManager: { getEntries: () => transcriptEntries },
   } as unknown as ExtensionContext;
   return { ctx, complete };
-}
-
-function capture(overrides: Partial<Capture> = {}): Capture {
-  return {
-    id: "capture-1",
-    repository_id: "repository-1",
-    conversation_id: "conversation-1",
-    conversation_key: { harness: "pi", external_id: "session-1" },
-    worktree_root: "/repo",
-    status: "pending_summary",
-    start_cursor: "start",
-    end_cursor: "end",
-    started_at: "2026-01-01T00:00:00Z",
-    ended_at: "2026-01-01T00:01:00Z",
-    last_seen_at: "2026-01-01T00:01:00Z",
-    ...overrides,
-  };
 }
 
 function episode(): Episode {
@@ -98,8 +82,7 @@ function episode(): Episode {
     paths: ["src/a.ts"],
     l1: "Short summary",
     l2: "Detailed brief",
-    start_cursor: "start",
-    end_cursor: "end",
+    transcript_id: "transcript-1",
     started_at: "2026-01-01T00:00:00Z",
     ended_at: "2026-01-01T00:01:00Z",
     created_at: "2026-01-01T00:01:01Z",
@@ -108,6 +91,7 @@ function episode(): Episode {
 
 const draft: FinalizationDraft = {
   capture_id: "capture-1",
+  transcript_id: "transcript-1",
   status: "pending_summary",
   empty: false,
   paths: ["src/a.ts"],
@@ -153,6 +137,7 @@ describe("generateSummary", () => {
     await expect(generateSummary("untrusted transcript", ctx)).resolves.toEqual({
       l1: "Short summary",
       l2: "Detailed brief",
+      compactEvidence: "untrusted transcript",
     });
     expect(complete).toHaveBeenCalledWith(
       ctx.model,
@@ -184,10 +169,10 @@ describe("generateSummary", () => {
     const model = { id: "small-model", contextWindow: 4_000 };
     const { ctx } = context({ complete, model });
 
-    await expect(generateSummary(`start\n\n${"evidence ".repeat(4_000)}\n\nend`, ctx)).resolves.toEqual({
+    await expect(generateSummary(`start\n\n${"evidence ".repeat(4_000)}\n\nend`, ctx)).resolves.toEqual(expect.objectContaining({
       l1: "Chunked summary",
       l2: "Combined segment evidence",
-    });
+    }));
 
     expect(segment).toBeGreaterThan(1);
     expect(complete).toHaveBeenCalledTimes(segment + 1);
@@ -216,10 +201,10 @@ describe("generateSummary", () => {
     });
     const { ctx } = context({ complete, model: { id: "small-model", contextWindow: 4_000 } });
 
-    await expect(generateSummary("original evidence ".repeat(4_000), ctx)).resolves.toEqual({
+    await expect(generateSummary("original evidence ".repeat(4_000), ctx)).resolves.toEqual(expect.objectContaining({
       l1: "Recursive summary",
       l2: "All levels combined",
-    });
+    }));
 
     expect(secondLevelCalls).toBeGreaterThan(0);
     const finalPrompt = complete.mock.calls.at(-1)![1].messages[0].content[0].text;
@@ -274,32 +259,56 @@ describe("generateSummary", () => {
 });
 
 describe("EpisodeFinalizer", () => {
-  it("projects, summarizes, and publishes authoritative paths", async () => {
-    const getCapture = vi.fn(async () => capture());
-    const publishEpisode = vi.fn(async () => episode());
-    const finalizer = new EpisodeFinalizer({ getCapture, publishEpisode });
+  const rawTranscript = (): TranscriptView => ({
+    transcript_id: "transcript-1",
+    view: "raw",
+    entries: [{ kind: "user", text: "implement summaries" }],
+  });
+
+  it("retrieves, summarizes, and publishes persisted evidence with authoritative paths", async () => {
+    const getTranscript = vi.fn(async () => rawTranscript());
+    const publishEpisode = vi.fn(async (
+      _captureID: string,
+      _l1: string,
+      _l2: string,
+      _compactEvidence: string,
+    ) => episode());
+    const finalizer = new EpisodeFinalizer({ getTranscript, publishEpisode });
     const { ctx, complete } = context();
+    (ctx.sessionManager as any).getEntries = () => {
+      throw new Error("Pi session transcript is unavailable");
+    };
 
     await expect(finalizer.finalize(draft, ctx)).resolves.toEqual({
       captureID: "capture-1",
       status: "published",
       episodeID: "episode-1",
     });
-    expect(getCapture).toHaveBeenCalledWith("capture-1", undefined);
+    expect(getTranscript).toHaveBeenCalledWith(
+      "/repo",
+      "transcript-1",
+      "raw",
+      0,
+      undefined,
+    );
+    const compactEvidence = publishEpisode.mock.calls[0]![3];
+    expect(compactEvidence).toContain("- src/a.ts");
+    expect(compactEvidence).toContain("implement summaries");
     expect(publishEpisode).toHaveBeenCalledWith(
       "capture-1",
       "Short summary",
       "Detailed brief",
+      compactEvidence,
       undefined,
     );
-    const modelContext = complete.mock.calls[0]![1] as any;
-    expect(modelContext.messages[0].content[0].text).toContain("- src/a.ts");
+    const finalPrompt = (complete.mock.calls[0]![1] as any).messages[0].content[0].text;
+    expect(finalPrompt.endsWith(compactEvidence)).toBe(true);
   });
 
-  it("returns immediately for an empty Capture without model or publish calls", async () => {
-    const getCapture = vi.fn(async () => capture());
+  it("returns immediately for an empty Capture without retrieval, model, or publish calls", async () => {
+    const getTranscript = vi.fn(async () => rawTranscript());
     const publishEpisode = vi.fn(async () => episode());
-    const finalizer = new EpisodeFinalizer({ getCapture, publishEpisode });
+    const finalizer = new EpisodeFinalizer({ getTranscript, publishEpisode });
     const { ctx, complete } = context();
 
     await expect(finalizer.finalize({
@@ -308,18 +317,18 @@ describe("EpisodeFinalizer", () => {
       empty: true,
       paths: [],
     }, ctx)).resolves.toEqual({ captureID: "capture-empty", status: "abandoned" });
-    expect(getCapture).not.toHaveBeenCalled();
+    expect(getTranscript).not.toHaveBeenCalled();
     expect(complete).not.toHaveBeenCalled();
     expect(publishEpisode).not.toHaveBeenCalled();
   });
 
   it.each(["model", "publish"])("leaves finalization failed when %s fails", async (failure) => {
-    const getCapture = vi.fn(async () => capture());
+    const getTranscript = vi.fn(async () => rawTranscript());
     const publishEpisode = vi.fn(async () => {
       if (failure === "publish") throw new Error("publish failed");
       return episode();
     });
-    const finalizer = new EpisodeFinalizer({ getCapture, publishEpisode });
+    const finalizer = new EpisodeFinalizer({ getTranscript, publishEpisode });
     const { ctx } = context({
       complete: async () => {
         if (failure === "model") throw new Error("model failed");

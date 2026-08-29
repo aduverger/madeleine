@@ -10,14 +10,50 @@ interface TextBlock {
   text: string;
 }
 
+export type TranscriptEntry =
+  | { kind: "user" | "assistant" | "branch_summary"; text: string }
+  | {
+    kind: "mutation";
+    operation: "edit" | "write";
+    path: string;
+    status: "success" | "failure";
+    error?: string;
+  };
+
+export interface TranscriptInput {
+  format_version: 1;
+  entries: TranscriptEntry[];
+}
+
+interface MutationCall {
+  operation: "edit" | "write";
+  path: string;
+}
+
+export function extractCaptureTranscript(
+  entries: SessionEntry[],
+  startCursor: string,
+  endCursor: string,
+): TranscriptInput {
+  const calls = new Map<string, MutationCall>();
+  const branch = captureBranch(entries, startCursor, endCursor);
+  return {
+    format_version: 1,
+    entries: branch.flatMap((entry) => projectEntry(entry, calls)),
+  };
+}
+
 export function projectCaptureTranscript(
   entries: SessionEntry[],
   startCursor: string,
   endCursor: string,
   paths: string[],
 ): string {
-  const branch = captureBranch(entries, startCursor, endCursor);
-  return formatProjection(branch.flatMap(projectEntry), paths);
+  return renderTranscript(extractCaptureTranscript(entries, startCursor, endCursor).entries, paths);
+}
+
+export function renderTranscript(entries: TranscriptEntry[], paths: string[]): string {
+  return formatProjection(entries.map(formatEntry), paths);
 }
 
 export function stripMadeleineContext(text: string): string {
@@ -54,10 +90,13 @@ function captureBranch(
   return branch.reverse();
 }
 
-function projectEntry(entry: SessionEntry): string[] {
+function projectEntry(
+  entry: SessionEntry,
+  calls: Map<string, MutationCall>,
+): TranscriptEntry[] {
   if (entry.type === "branch_summary") {
-    const summary = cleanText(entry.summary);
-    return summary ? [`[Branch summary]\n${summary}`] : [];
+    const text = cleanText(entry.summary);
+    return text ? [{ kind: "branch_summary", text }] : [];
   }
   if (entry.type !== "message") return [];
 
@@ -65,29 +104,47 @@ function projectEntry(entry: SessionEntry): string[] {
   switch (message.role) {
     case "user": {
       const text = contentText(message.content);
-      return text ? [`[User]\n${text}`] : [];
+      return text ? [{ kind: "user", text }] : [];
     }
     case "assistant": {
-      const projected: string[] = [];
-      const text = contentText(message.content);
-      if (text) projected.push(`[Assistant]\n${text}`);
       for (const block of message.content) {
         if (block.type !== "toolCall" || !mutationTools.has(block.name)) continue;
         const path = mutationPath(block.arguments);
-        projected.push(`[Mutation ${block.name}]${path ? `\nPath: ${path}` : ""}`);
+        if (path) {
+          calls.set(block.id, { operation: block.name as "edit" | "write", path });
+        }
       }
-      return projected;
+      const text = contentText(message.content);
+      return text ? [{ kind: "assistant", text }] : [];
     }
     case "toolResult": {
-      if (!mutationTools.has(message.toolName)) return [];
+      const call = calls.get(message.toolCallId);
+      if (!call || message.toolName !== call.operation) return [];
       const status = message.isError ? "failure" : "success";
       const error = message.isError
         ? truncateCharacters(contentText(message.content), maxMutationErrorCharacters)
-        : "";
-      return [`[Mutation result ${message.toolName}: ${status}]${error ? `\n${error}` : ""}`];
+        : undefined;
+      return [{ kind: "mutation", ...call, status, ...(error ? { error } : {}) }];
     }
     default:
       return [];
+  }
+}
+
+function formatEntry(entry: TranscriptEntry): string {
+  switch (entry.kind) {
+    case "user":
+      return `[User]\n${entry.text}`;
+    case "assistant":
+      return `[Assistant]\n${entry.text}`;
+    case "branch_summary":
+      return `[Branch summary]\n${entry.text}`;
+    case "mutation":
+      return [
+        `[Mutation ${entry.operation}: ${entry.status}]`,
+        `Path: ${entry.path}`,
+        entry.error,
+      ].filter(Boolean).join("\n");
   }
 }
 

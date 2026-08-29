@@ -4,8 +4,8 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
-import type { Capture, Episode, FinalizationDraft } from "./rpc.ts";
-import { projectCaptureTranscript } from "./transcript.ts";
+import type { Episode, FinalizationDraft, TranscriptView } from "./rpc.ts";
+import { renderTranscript, type TranscriptEntry } from "./transcript.ts";
 
 export const summaryPromptVersion = 1;
 export const summaryTimeoutMs = 30_000;
@@ -36,8 +36,20 @@ export type EpisodeFinalization = {
 };
 
 export interface SummaryClient {
-  getCapture(captureID: string, signal?: AbortSignal): Promise<Capture>;
-  publishEpisode(captureID: string, l1: string, l2: string, signal?: AbortSignal): Promise<Episode>;
+  getTranscript(
+    repositoryRoot: string,
+    transcriptID: string,
+    view: "compact" | "raw",
+    offset?: number,
+    signal?: AbortSignal,
+  ): Promise<TranscriptView>;
+  publishEpisode(
+    captureID: string,
+    l1: string,
+    l2: string,
+    compactEvidence: string,
+    signal?: AbortSignal,
+  ): Promise<Episode>;
 }
 
 export class EpisodeFinalizer {
@@ -62,24 +74,45 @@ export class EpisodeFinalizer {
       throw new Error(`Capture ${draft.capture_id} is not pending summary`);
     }
 
-    const capture = await this.client.getCapture(draft.capture_id, lifecycleSignal);
-    if (capture.status !== "pending_summary" || !capture.end_cursor) {
-      throw new Error(`Capture ${draft.capture_id} has incomplete summary state`);
+    if (!draft.transcript_id) {
+      throw new Error(`Capture ${draft.capture_id} has no Transcript`);
     }
-    const projection = projectCaptureTranscript(
-      ctx.sessionManager.getEntries(),
-      capture.start_cursor,
-      capture.end_cursor,
-      draft.paths,
+    const entries = await this.loadTranscriptEntries(
+      ctx.cwd,
+      draft.transcript_id,
+      lifecycleSignal,
     );
-    const summary = await generateSummary(projection, ctx, lifecycleSignal);
+    const summary = await generateSummary(renderTranscript(entries, draft.paths), ctx, lifecycleSignal);
     const episode = await this.client.publishEpisode(
       draft.capture_id,
       summary.l1,
       summary.l2,
+      summary.compactEvidence,
       lifecycleSignal,
     );
     return { captureID: draft.capture_id, status: "published", episodeID: episode.id };
+  }
+
+  private async loadTranscriptEntries(
+    repositoryRoot: string,
+    transcriptID: string,
+    signal?: AbortSignal,
+  ): Promise<TranscriptEntry[]> {
+    const entries: TranscriptEntry[] = [];
+    let offset = 0;
+    while (true) {
+      const page = await this.client.getTranscript(
+        repositoryRoot,
+        transcriptID,
+        "raw",
+        offset,
+        signal,
+      );
+      entries.push(...(page.entries ?? []));
+      if (page.next_offset === undefined) return entries;
+      if (page.next_offset <= offset) throw new Error("Transcript pagination did not advance");
+      offset = page.next_offset;
+    }
   }
 }
 
@@ -106,15 +139,16 @@ export async function generateSummary(
     summaryMaxTokens,
     lifecycleSignal,
   );
-  return validateSummary(response);
+  return { ...validateSummary(response), compactEvidence: evidence };
 }
 
 export interface EpisodeSummary {
   l1: string;
   l2: string;
+  compactEvidence: string;
 }
 
-export function validateSummary(response: string): EpisodeSummary {
+export function validateSummary(response: string): Pick<EpisodeSummary, "l1" | "l2"> {
   let value: unknown;
   try {
     value = JSON.parse(response);
