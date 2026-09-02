@@ -52,7 +52,8 @@ jobs:
         working-directory: harnesses/pi
         run: |
           version="$(node -p "require('./package.json').version")"
-          case "$version" in
+          release_version="${version%%+*}"
+          case "$release_version" in
             *-*)
               test "$NPM_TAG" != "latest" || {
                 echo "Prereleases cannot use the latest npm tag"

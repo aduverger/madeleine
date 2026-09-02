@@ -29,7 +29,8 @@ pack-check:
 release:
 	@test -n "$(VERSION)" || { echo "Usage: make release VERSION=x.y.z [NPM_TAG=latest]"; exit 1; }
 	@node -e 'if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$$/.test(process.argv[1])) { console.error("VERSION must be an explicit semantic version"); process.exit(1); }' "$(VERSION)"
-	@case "$(VERSION)" in *-*) test "$(NPM_TAG)" != "latest" || { echo "Prereleases require NPM_TAG other than latest"; exit 1; };; esac
+	@release_version="$(VERSION)"; release_version="$${release_version%%+*}"; \
+	case "$$release_version" in *-*) test "$(NPM_TAG)" != "latest" || { echo "Prereleases require NPM_TAG other than latest"; exit 1; };; esac
 	@test "$$(git branch --show-current)" = "main" || { echo "Releases must run from main"; exit 1; }
 	@test -z "$$(git status --porcelain)" || { echo "Working tree must be clean"; exit 1; }
 	git fetch --prune --tags origin main
