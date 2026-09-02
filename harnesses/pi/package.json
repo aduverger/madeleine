@@ -1,10 +1,24 @@
 {
   "name": "@aduverger/madeleine-pi",
   "version": "0.1.0",
+  "description": "Local-first historical context for Pi coding agents.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aduverger/madeleine.git",
+    "directory": "harnesses/pi"
+  },
+  "homepage": "https://github.com/aduverger/madeleine#readme",
+  "bugs": {
+    "url": "https://github.com/aduverger/madeleine/issues"
+  },
   "type": "module",
   "license": "Apache-2.0",
+  "author": "Alexandre Duverger",
   "keywords": [
-    "pi-package"
+    "pi-package",
+    "pi-extension",
+    "coding-agent",
+    "memory"
   ],
   "files": [
     "commands.ts",
@@ -19,7 +33,8 @@
     "transcript-tool.ts",
     "transcript.ts",
     "LICENSE",
-    "NOTICE"
+    "NOTICE",
+    "README.md"
   ],
   "publishConfig": {
     "access": "public"
@@ -35,7 +50,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest --run",
-    "check": "npm run typecheck && npm test"
+    "pack:check": "npm_config_cache=.npm-cache npm pack --dry-run",
+    "check": "npm run typecheck && npm test",
+    "prepack": "npm run check"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

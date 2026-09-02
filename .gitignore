@@ -19,6 +19,8 @@ profile.cov
 
 # Dependency directories
 node_modules/
+.npm-cache/
+*.tgz
 # vendor/
 
 # Go workspace file

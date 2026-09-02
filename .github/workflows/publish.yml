@@ -1,0 +1,69 @@
+name: Publish npm package
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Verify all release gates without publishing (set false only to publish)
+        required: true
+        default: true
+        type: boolean
+      tag:
+        description: npm dist-tag used only when dry_run is false
+        required: true
+        default: next
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    env:
+      NPM_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 1.26.x
+          cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: harnesses/pi/package-lock.json
+      - run: npm ci
+        working-directory: harnesses/pi
+      - run: make check
+      - run: make pack-check
+      - name: Validate release tag
+        if: inputs.dry_run == false
+        working-directory: harnesses/pi
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          release_version="${version%%+*}"
+          case "$release_version" in
+            *-*)
+              test "$NPM_TAG" != "latest" || {
+                echo "Prereleases cannot use the latest npm tag"
+                exit 1
+              }
+              ;;
+          esac
+          test "$GITHUB_REF" = "refs/tags/v$version" || {
+            echo "Dispatch publication from tag v$version"
+            exit 1
+          }
+          test "$(git rev-parse "v$version^{commit}")" = "$GITHUB_SHA" || {
+            echo "Tag v$version does not match the checked-out commit"
+            exit 1
+          }
+      - if: inputs.dry_run == false
+        run: npm publish --access public --provenance --tag "$NPM_TAG"
+        working-directory: harnesses/pi
