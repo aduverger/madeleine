@@ -237,8 +237,9 @@ version.
 `.github/workflows/publish.yml` supports manually dispatched npm trusted
 publishing with provenance. It defaults to a dry run. Configure the npm trusted
 publisher for repository `aduverger/madeleine`, workflow `publish.yml`, and
-GitHub environment `npm` before enabling publication. That workflow publishes
-only npm; push the matching root Git tag separately to release the Go version.
+GitHub environment `npm` before enabling publication. Dry runs may use a branch;
+publication must be dispatched from the matching root Git tag, which also
+releases the Go version.
 
 ## Scope
 

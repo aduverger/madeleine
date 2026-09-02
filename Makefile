@@ -34,14 +34,17 @@ release:
 	@test -z "$$(git status --porcelain)" || { echo "Working tree must be clean"; exit 1; }
 	git fetch --prune --tags origin main
 	@test "$$(git rev-parse HEAD)" = "$$(git rev-parse origin/main)" || { echo "main must match origin/main"; exit 1; }
-	@npm whoami --registry="$(NPM_REGISTRY)" >/dev/null
-	@if git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null; then \
-		echo "Git tag v$(VERSION) already exists"; exit 1; \
-	fi
-	@if npm view "$(NPM_PACKAGE)@$(VERSION)" version --registry="$(NPM_REGISTRY)" >/dev/null 2>&1; then \
-		echo "$(NPM_PACKAGE)@$(VERSION) already exists"; exit 1; \
-	fi
 	@current_version="$$(node -p "require('./$(PI_PACKAGE_DIR)/package.json').version")"; \
+	published_version="$$(npm view "$(NPM_PACKAGE)@$(VERSION)" version --registry="$(NPM_REGISTRY)" 2>/dev/null || true)"; \
+	if test -n "$$published_version" && test "$$current_version" != "$(VERSION)"; then \
+		echo "$(NPM_PACKAGE)@$(VERSION) exists but package.json is $$current_version"; exit 1; \
+	fi; \
+	if test -z "$$published_version"; then \
+		npm whoami --registry="$(NPM_REGISTRY)" >/dev/null; \
+	fi; \
+	if git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null && test "$$current_version" != "$(VERSION)"; then \
+		echo "Git tag v$(VERSION) exists but package.json is $$current_version"; exit 1; \
+	fi; \
 	if test "$$current_version" != "$(VERSION)"; then \
 		cd $(PI_PACKAGE_DIR) && npm version "$(VERSION)" --no-git-tag-version; \
 	fi
@@ -52,13 +55,27 @@ release:
 		git commit -m "Release $(VERSION)" && \
 		git push origin main; \
 	fi
-	cd $(PI_PACKAGE_DIR) && npm publish --access public --tag "$(NPM_TAG)" --registry="$(NPM_REGISTRY)"
+	@if git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null; then \
+		test "$$(git rev-parse "refs/tags/v$(VERSION)^{commit}")" = "$$(git rev-parse HEAD)" || \
+			{ echo "Git tag v$(VERSION) points to another commit"; exit 1; }; \
+	fi
+	@published_version="$$(npm view "$(NPM_PACKAGE)@$(VERSION)" version --registry="$(NPM_REGISTRY)" 2>/dev/null || true)"; \
+	if test "$$published_version" = "$(VERSION)"; then \
+		published_head="$$(npm view "$(NPM_PACKAGE)@$(VERSION)" gitHead --registry="$(NPM_REGISTRY)" --prefer-online 2>/dev/null)"; \
+		test "$$published_head" = "$$(git rev-parse HEAD)" || \
+			{ echo "$(NPM_PACKAGE)@$(VERSION) was published from another commit"; exit 1; }; \
+		echo "$(NPM_PACKAGE)@$(VERSION) is already published; resuming release"; \
+	else \
+		cd $(PI_PACKAGE_DIR) && npm publish --access public --tag "$(NPM_TAG)" --registry="$(NPM_REGISTRY)"; \
+	fi
 	@attempt=0; \
 	until test "$$(npm view "$(NPM_PACKAGE)@$(VERSION)" version --registry="$(NPM_REGISTRY)" --prefer-online 2>/dev/null)" = "$(VERSION)"; do \
 		attempt=$$((attempt + 1)); \
 		test $$attempt -lt 61 || { echo "Published version was not visible in the registry after 10 minutes"; exit 1; }; \
 		sleep 10; \
 	done
-	git tag -a "v$(VERSION)" -m "v$(VERSION)"
+	@if ! git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null; then \
+		git tag -a "v$(VERSION)" -m "v$(VERSION)"; \
+	fi
 	git push origin "v$(VERSION)"
 	@echo "Released $(NPM_PACKAGE)@$(VERSION) with npm tag $(NPM_TAG)"
