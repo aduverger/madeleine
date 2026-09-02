@@ -42,8 +42,6 @@ function setup(
   const client: RecoveryClient = {
     listPendingCaptures: vi.fn(async () => captures),
     sealCapture: vi.fn(async (captureID) => draft(captures.find((item) => item.id === captureID)!)),
-    getTranscript: vi.fn(),
-    publishEpisode: vi.fn(),
   };
   const finalizer = { finalize: vi.fn(finalize) };
   const worker = new PendingCaptureRecovery(client, finalizer);

@@ -87,12 +87,16 @@ class DeterministicModels {
           this.blockedResolve = undefined;
         });
       }
-      const text = this.malformedResponses > 0
-        ? (this.malformedResponses--, "not JSON")
-        : JSON.stringify({
-            l1: "Madeleine recorded the completed file changes and their intent.",
-            l2: "The agent intentionally changed the recorded paths. The persisted bounded evidence contains the conversation and structured mutation outcomes used for this summary.",
-          });
+      let text: string;
+      if (this.malformedResponses > 0) {
+        this.malformedResponses--;
+        text = "not JSON";
+      } else {
+        text = JSON.stringify({
+          l1: "Madeleine recorded the completed file changes and their intent.",
+          l2: "The agent intentionally changed the recorded paths. The persisted bounded evidence contains the conversation and structured mutation outcomes used for this summary.",
+        });
+      }
       return {
         role: "assistant",
         content: [{ type: "text", text }],

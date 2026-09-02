@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -56,10 +57,9 @@ func TestConcurrentReadersWritersAndPublishers(t *testing.T) {
 	}
 
 	start := make(chan struct{})
-	errors := make(chan error, agents*3)
+	operationErrors := make(chan error, agents*3)
 	var workers sync.WaitGroup
 	for index := range agents {
-		index := index
 		workers.Add(3)
 		go func() {
 			defer workers.Done()
@@ -70,11 +70,11 @@ func TestConcurrentReadersWritersAndPublishers(t *testing.T) {
 					Paths:          []string{readerPaths[index]},
 				})
 				if err != nil {
-					errors <- err
+					operationErrors <- err
 					return
 				}
 				if len(contexts) != 1 || len(contexts[0].Episodes) != 1 {
-					errors <- fmt.Errorf("reader %d returned incomplete context", index)
+					operationErrors <- fmt.Errorf("reader %d returned incomplete context", index)
 					return
 				}
 			}
@@ -88,7 +88,7 @@ func TestConcurrentReadersWritersAndPublishers(t *testing.T) {
 					CaptureID: writerCaptures[index].ID,
 					Path:      path,
 				}); err != nil {
-					errors <- err
+					operationErrors <- err
 					return
 				}
 			}
@@ -103,14 +103,14 @@ func TestConcurrentReadersWritersAndPublishers(t *testing.T) {
 				CompactEvidence: fmt.Sprintf("publisher evidence %d", index),
 			})
 			if err != nil {
-				errors <- err
+				operationErrors <- err
 			}
 		}()
 	}
 	close(start)
 	workers.Wait()
-	close(errors)
-	for err := range errors {
+	close(operationErrors)
+	for err := range operationErrors {
 		t.Errorf("concurrent operation: %v", err)
 	}
 	if t.Failed() {
@@ -165,7 +165,6 @@ func benchmarkConcurrentAgents(b *testing.B, agents int) {
 		var workers sync.WaitGroup
 		workers.Add(agents)
 		for index, capture := range captures {
-			index, capture := index, capture
 			go func() {
 				defer workers.Done()
 				path := fmt.Sprintf("benchmark/%d/%d.go", iteration, index)
@@ -290,5 +289,5 @@ func newGitRepository(t testing.TB) string {
 	if err != nil {
 		t.Fatalf("git root: %v", err)
 	}
-	return filepath.Clean(string(output[:len(output)-1]))
+	return filepath.Clean(strings.TrimSuffix(string(output), "\n"))
 }

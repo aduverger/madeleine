@@ -1,7 +1,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import type { Capture, FinalizationDraft } from "./rpc.ts";
-import type { EpisodeFinalization, SummaryClient } from "./summary.ts";
+import type { EpisodeFinalization } from "./summary.ts";
 
 export type RetryResult = {
   captureID: string;
@@ -20,7 +20,7 @@ export interface RecoveryFinalizer {
   ): Promise<EpisodeFinalization>;
 }
 
-export interface RecoveryClient extends SummaryClient {
+export interface RecoveryClient {
   listPendingCaptures(
     repositoryRoot: string,
     externalID?: string,
