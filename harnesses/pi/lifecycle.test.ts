@@ -445,7 +445,7 @@ describe("Capture lifecycle", () => {
   });
 
   it.each([false, true])(
-    "seals before tree navigation outside the Capture and starts again with summary=%s",
+    "seals before tree navigation and starts again with summary=%s",
     async (withSummary) => {
       const finalize = vi.fn(async (sealed: FinalizationDraft) => ({
         captureID: sealed.capture_id,
@@ -556,38 +556,56 @@ describe("Capture lifecycle", () => {
     },
   );
 
-  it("seals when Pi moves behind a Capture-start user message", async () => {
+  it("finalizes before an in-boundary rewind and cleanly seals the destination", async () => {
     const finalize = vi.fn(async (sealed: FinalizationDraft) => ({
       captureID: sealed.capture_id,
       status: "published" as const,
       episodeID: `episode-${sealed.capture_id}`,
     }));
-    const { pi, client, ctx } = setup(() => 0, { finalize });
-    addCaptureAncestor(pi);
-    pi.entries[1] = {
-      type: "message",
-      id: "leaf-1",
-      parentId: "before-capture",
-      timestamp: "2026-01-01T00:00:00Z",
-      message: { role: "user", content: "unanswered request", timestamp: 0 },
-    };
+    const { pi, client, lifecycle, ctx } = setup(() => 0, { finalize });
     await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
+    const captureBoundary = pi.leaf;
+    pi.entries.push({
+      type: "message",
+      id: "first-user",
+      parentId: captureBoundary,
+      timestamp: "2026-01-01T00:00:00Z",
+      message: { role: "user", content: "change src/first.ts", timestamp: 0 },
+    });
+    pi.leaf = "first-user";
     appendWriteExchange(pi, "first", "src/first.ts");
+    await pi.emit("tool_result", mutation("write", "src/first.ts"), ctx);
 
     await pi.emit("session_before_tree", {
       type: "session_before_tree",
       preparation: {
-        targetId: "leaf-1",
+        targetId: "first-user",
         oldLeafId: pi.leaf,
-        commonAncestorId: "leaf-1",
+        commonAncestorId: "first-user",
         entriesToSummarize: [],
         userWantsSummary: false,
       },
       signal: new AbortController().signal,
     }, ctx);
+    expect(client.sealedTranscript?.entries).toEqual([
+      { kind: "user", text: "change src/first.ts" },
+      { kind: "mutation", operation: "write", path: "src/first.ts", status: "success" },
+    ]);
 
-    expect(client.calls.filter((call) => call.method === "seal")).toHaveLength(1);
-    expect(client.captures[0]?.end_cursor).toBe("first-result");
+    pi.leaf = captureBoundary;
+    await pi.emit("session_tree", {
+      type: "session_tree",
+      newLeafId: captureBoundary,
+      oldLeafId: "first-result",
+    }, ctx);
+    client.emptySeal = true;
+    await pi.emit("session_shutdown", { type: "session_shutdown", reason: "quit" }, ctx);
+
+    expect(client.calls.filter((call) => call.method === "seal")).toHaveLength(2);
+    expect(client.captures[0]?.status).toBe("pending_summary");
+    expect(client.captures[1]?.status).toBe("abandoned");
+    expect(client.captures[2]?.status).toBe("abandoned");
+    expect(lifecycle.currentCaptureID()).toBeUndefined();
   });
 
   it("cancels tree navigation when the active Capture cannot be sealed", async () => {

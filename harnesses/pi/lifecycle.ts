@@ -4,7 +4,6 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
   type SessionBeforeTreeEvent,
-  type SessionEntry,
   type SessionShutdownEvent,
   type SessionStartEvent,
   type SessionTreeEvent,
@@ -290,10 +289,6 @@ export class CaptureLifecycle {
     if (!captureID) return;
 
     try {
-      const entries = ctx.sessionManager.getEntries();
-      const capture = await this.client.getCapture(captureID, event.signal);
-      const destinationCursor = effectiveTreeDestination(entries, event.preparation.targetId);
-      if (cursorIsAncestor(entries, capture.start_cursor, destinationCursor)) return;
       if (!event.preparation.oldLeafId) throw new Error("Pi tree navigation has no source leaf");
 
       this.workController.abort();
@@ -382,30 +377,6 @@ export class CaptureLifecycle {
     this.sentNotifications.add(key);
     ctx.ui.notify(message, "warning");
   }
-}
-
-function effectiveTreeDestination(entries: SessionEntry[], targetID: string): string | null {
-  const target = entries.find((entry) => entry.id === targetID);
-  if (!target) return null;
-  if (target.type === "custom_message") return target.parentId;
-  if (target.type === "message" && target.message.role === "user") return target.parentId;
-  return targetID;
-}
-
-function cursorIsAncestor(
-  entries: SessionEntry[],
-  ancestorID: string,
-  cursorID: string | null,
-): boolean {
-  const entriesByID = new Map(entries.map((entry) => [entry.id, entry]));
-  const visited = new Set<string>();
-  let cursor: string | null = cursorID;
-  while (cursor && !visited.has(cursor)) {
-    if (cursor === ancestorID) return true;
-    visited.add(cursor);
-    cursor = entriesByID.get(cursor)?.parentId ?? null;
-  }
-  return false;
 }
 
 export async function resolvePiToolPath(inputPath: string, cwd: string): Promise<string> {

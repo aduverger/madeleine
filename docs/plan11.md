@@ -208,13 +208,12 @@ transcript; they are not new L3/L4 summary levels.
 - [x] Raw view excludes compaction entries but retains original messages across
   a compaction.
 - [x] Branch summaries are retained without traversing abandoned raw branches.
-- [x] Tree navigation before the active Capture boundary seals the source
-  interval, keeps a fallback source Capture through Pi summarization, and starts
-  a destination Capture after navigation; preservation failure cancels
-  navigation and a generated branch summary becomes the destination's first
-  semantic entry.
-- [x] The ancestry check mirrors Pi's effective destination when selecting a
-  user or custom message, and aborted or failed branch summarization leaves the
+- [x] Every non-no-op tree navigation seals the source interval, keeps a
+  fallback source Capture through Pi summarization, and starts a destination
+  Capture after navigation; preservation failure cancels navigation and a
+  generated branch summary becomes the destination's first semantic entry.
+- [x] A write followed by an in-boundary rewind and shutdown preserves the old
+  branch's semantic evidence; aborted or failed branch summarization leaves the
   source fallback Capture active.
 - [x] Read calls/output, edit/write bodies, successful result prose, binary
   content, custom state, thinking, and recursive Madeleine context are excluded.
@@ -272,20 +271,20 @@ Listed least-confident first:
    entry budget, safely below the adapter's 16 MiB child-process output cap for
    multi-entry pages. The Pi adapter then exposes the largest complete prefix
    that fits its escaped 50KB/2000-line wrapper and advances to the first hidden
-   entry; pagination metadata is outside truncatable content. If one entry alone exceeds a bound,
-   the page still returns that entry and Pi may show a truncated version; an
-   entry above the transport cap remains unavailable through this RPC.
+   entry; pagination metadata is outside truncatable content. If one entry alone
+   exceeds a bound, the page still returns that entry and Pi may show a
+   truncated version. An entry above the transport cap remains unavailable
+   through this RPC.
    Intra-entry continuation is deferred as disproportionate MVP complexity. A
    negative offset, compact-view offset, or positive offset beyond available
    entries remains invalid.
-2. Before Pi tree navigation moves outside the active Capture boundary, the
-   adapter seals at the source leaf and immediately opens a fallback Capture on
-   that branch. Failed or cancelled Pi summarization therefore leaves capture
-   active. On successful navigation the empty fallback is abandoned and the
-   destination Capture begins before a generated branch summary so the summary
-   is retained. The ancestry check mirrors Pi's parent target for selected user
-   and custom messages. Navigation whose effective target still descends from
-   the Capture start cursor does not split the Capture.
+2. Every non-no-op Pi tree navigation is a Capture boundary. The adapter seals
+   at the source leaf and immediately opens a fallback Capture on that branch.
+   Failed or cancelled Pi summarization therefore leaves capture active. On
+   successful navigation the empty fallback is abandoned and the destination
+   Capture begins before a generated branch summary so the summary is retained.
+   This deliberately creates more Capture boundaries than ancestry-based
+   splitting, but keeps each branch's paths aligned with its semantic evidence.
 3. Mutation entries are emitted when an `edit` or `write` tool result matches a
    bounded-branch tool call. This stores operation, path, and success/failure at
    the chronological result position; incomplete calls without a result are

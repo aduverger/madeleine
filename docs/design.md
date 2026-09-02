@@ -211,15 +211,14 @@ entries so a reload does not duplicate historical context.
 
 ### Tree navigation
 
-Navigation within the active Capture's branch keeps that Capture open. The
-adapter computes Pi's effective destination first: selecting a user or custom
-message targets its parent, while other selections target the entry itself.
-Before `/tree` crosses the Capture boundary, Madeleine seals the old interval at
-the source leaf and opens a temporary source Capture. If Pi's optional branch
-summary fails or is cancelled, that Capture continues recording on the unchanged
-branch. After successful navigation, Madeleine abandons the unused temporary
-Capture and starts the destination Capture. A generated branch summary is the
-first semantic entry inside that destination boundary.
+Every non-no-op `/tree` navigation is a Capture boundary. Madeleine seals the
+old interval at the source leaf and opens a temporary source Capture before Pi
+runs an optional branch summary. If summarization fails or is cancelled, that
+Capture continues recording on the unchanged branch. After successful
+navigation, Madeleine abandons the unused temporary Capture and starts the
+destination Capture. A generated branch summary is the first semantic entry
+inside that destination boundary. This keeps paths and intent from an abandoned
+branch together instead of mixing them into the destination branch's evidence.
 
 ### Crash and resume
 
