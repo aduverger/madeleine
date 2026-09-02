@@ -52,9 +52,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest --run",
     "verify:package": "node scripts/verify-package.mjs",
-    "pack:check": "npm_config_cache=.npm-cache npm pack --dry-run && npm run verify:package",
-    "check": "npm run typecheck && npm test && npm run verify:package",
-    "prepack": "npm run check"
+    "pack:check": "npm_config_cache=.npm-cache npm pack --dry-run",
+    "check": "npm run typecheck && npm test",
+    "prepack": "npm run check && npm run verify:package"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

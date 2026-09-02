@@ -205,10 +205,7 @@ you intentionally want to remove all Madeleine data.
 
 ```sh
 make check
-cd harnesses/pi
-npm ci
-npm run check
-cd ../..
+npm --prefix harnesses/pi ci
 make pack-check
 ```
 

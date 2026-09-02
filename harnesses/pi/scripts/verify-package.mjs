@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url)));
-const expected = {
+const expectedMetadata = {
   name: "@aduverger/madeleine-pi",
   repository: "git+https://github.com/aduverger/madeleine.git",
   repositoryDirectory: "harnesses/pi",
@@ -12,13 +12,19 @@ const expected = {
   bugs: "https://github.com/aduverger/madeleine/issues",
   author: "Alexandre Duverger",
 };
+const packageMetadata = {
+  name: pkg.name,
+  repository: pkg.repository?.url,
+  repositoryDirectory: pkg.repository?.directory,
+  homepage: pkg.homepage,
+  bugs: pkg.bugs?.url,
+  author: pkg.author,
+};
 
-for (const [field, value] of Object.entries(expected)) {
-  let actual = pkg[field];
-  if (field === "repository") actual = pkg.repository?.url;
-  if (field === "repositoryDirectory") actual = pkg.repository?.directory;
-  if (field === "bugs") actual = pkg.bugs?.url;
-  if (actual !== value) throw new Error(`package ${field} must be ${value}`);
+for (const [field, expected] of Object.entries(expectedMetadata)) {
+  if (packageMetadata[field] !== expected) {
+    throw new Error(`package ${field} must be ${expected}`);
+  }
 }
 if (pkg.publishConfig?.access !== "public") throw new Error("package must publish with public access");
 if (JSON.stringify(pkg.pi?.extensions) !== JSON.stringify(["./index.ts"])) {
@@ -70,10 +76,5 @@ for (const file of packed) {
 }
 for (const file of allowed) {
   if (!packed.has(file)) throw new Error(`package omits required file: ${file}`);
-}
-for (const file of packed) {
-  if (/\.test\.|package-lock\.json|tsconfig|vitest/.test(file)) {
-    throw new Error(`package contains forbidden development file: ${file}`);
-  }
 }
 console.log("package verification passed");
