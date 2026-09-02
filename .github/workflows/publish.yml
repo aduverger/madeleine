@@ -1,0 +1,50 @@
+name: Publish npm package
+run-name: ${{ inputs.run_nonce }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Verify all release gates without publishing (set false only to publish)
+        required: true
+        default: true
+        type: boolean
+      tag:
+        description: npm dist-tag used only when dry_run is false
+        required: true
+        default: next
+        type: string
+      run_nonce:
+        description: Correlation nonce for this dispatch
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 1.26.x
+          cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: harnesses/pi/package-lock.json
+      - run: npm ci
+        working-directory: harnesses/pi
+      - run: make check
+      - run: make pack-check
+      - if: inputs.dry_run == false
+        run: npm publish --access public --provenance --tag "$NPM_TAG"
+        working-directory: harnesses/pi
+        env:
+          NPM_TAG: ${{ inputs.tag }}

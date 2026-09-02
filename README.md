@@ -208,12 +208,40 @@ make check
 cd harnesses/pi
 npm ci
 npm run check
+cd ../..
+make pack-check
 ```
 
 CI runs Go and Pi checks on macOS and Linux. The end-to-end suite builds the real
 `madeleine` binary, uses temporary Git repositories and SQLite homes, and drives
 a fake deterministic Pi runtime through lifecycle, recovery, retrieval, and
 failure scenarios.
+
+## Release
+
+Release the Go application and npm adapter at the same version from a clean,
+synchronized `main` branch:
+
+```sh
+make release VERSION=0.1.0
+```
+
+For a prerelease, use a non-`latest` npm tag:
+
+```sh
+make release VERSION=0.2.0-rc.1 NPM_TAG=next
+```
+
+The release target validates Git and npm state, updates the package version when
+needed, runs all quality gates, publishes `@aduverger/madeleine-pi`, verifies the
+registry, and pushes the matching Git tag. That tag also publishes the Go module
+version.
+
+`.github/workflows/publish.yml` supports manually dispatched npm trusted
+publishing with provenance. It defaults to a dry run. Configure the npm trusted
+publisher for repository `aduverger/madeleine`, workflow `publish.yml`, and
+GitHub environment `npm` before enabling publication. That workflow publishes
+only npm; push the matching root Git tag separately to release the Go version.
 
 ## Scope
 

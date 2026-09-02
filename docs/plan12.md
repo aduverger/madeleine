@@ -27,7 +27,12 @@ harnesses/pi/recovery.ts
 harnesses/pi/lifecycle.ts
 harnesses/pi/commands.ts
 harnesses/pi/*.test.ts
+harnesses/pi/package*.json
+harnesses/pi/README.md
+harnesses/pi/scripts/verify-package.mjs
 test/e2e/*
+.github/workflows/*
+Makefile
 README.md
 ```
 
@@ -156,6 +161,10 @@ pi install npm:@aduverger/madeleine-pi@0.1.0
 - [ ] Run `make check` and `npm run check` on Linux and macOS.
 - [x] Verify `go install` from a clean module cache.
 - [x] Verify `pi install` package discovery from a clean temporary Pi home.
+- [x] Verify npm metadata and the exact published-file allowlist during checks
+  and before packing.
+- [x] Add a guarded local release target and a manually dispatched trusted
+  publishing workflow that defaults to a dry run.
 - [ ] Manually run Pi against a disposable Git repository through edit,
   capture, shutdown, read-context, L2 lookup, compact/raw Transcript lookup,
   reload, and crash/resume scenarios.
@@ -168,49 +177,54 @@ pi install npm:@aduverger/madeleine-pi@0.1.0
 
 Listed least-confident first:
 
-1. Recovery remains automatic rather than exposing its queue as a user command.
+1. The Go module and npm adapter share one release version and root Git tag.
+   The guarded local target publishes both by publishing npm and pushing the
+   matching tag; the manual trusted-publishing workflow is npm-only, defaults to
+   a dry run, and provides provenance. If asking were free, I would have asked
+   whether future adapters should keep independent version lines instead.
+2. Recovery remains automatic rather than exposing its queue as a user command.
    Each pending Capture is attempted once per extension runtime and remains
    pending for the next runtime after failure. Current path recording never uses
    the recovery queue. The startup snapshot also excludes the Capture that was
    current when recovery began, even if a concurrent manual capture seals it
    before the list query completes.
-2. The vertical-slice suite uses a deterministic fake Pi event/session/model
+3. The vertical-slice suite uses a deterministic fake Pi event/session/model
    runtime but crosses the real child-process JSON boundary into a freshly
    compiled Madeleine binary, temporary Git repositories, and temporary SQLite
    homes. Calling an authenticated external model in CI would make recovery
    tests nondeterministic and billable. If asking were free, I would have asked
    whether a billable manual Pi smoke run was required before opening the PR;
    that checklist item remains open.
-3. `RPCClient` now merges its configured environment into the inherited process
+4. `RPCClient` now merges its configured environment into the inherited process
    environment. This lets isolated installations select `MADELEINE_HOME`
    without losing `PATH` and other variables required by Git and the runtime.
    If asking were free, I would have confirmed whether callers expected a
    supplied environment to replace inheritance entirely.
-4. Entire CLI commit `60773bd4b89e487a897958b00a1d168a7ea5aa01` was inspected
+5. Entire CLI commit `60773bd4b89e487a897958b00a1d168a7ea5aa01` was inspected
    at `cmd/entire/cli/agent/pi/lifecycle.go`, its lifecycle tests, the embedded
    Pi extension, and session/transcript readers. No Plan 12 recovery code was
    copied: Entire snapshots native transcript files and drives Git checkpoint
    turns, while Madeleine retries immutable SQLite Transcripts and publishes
    cursor-bounded Episodes. Existing attribution for earlier compatible process
    and extraction mechanics remains in `NOTICE`.
-5. Startup always checks the canonical Conversation-scoped open-Capture list,
+6. Startup always checks the canonical Conversation-scoped open-Capture list,
    even when Pi state names a Capture. This costs one list RPC but detects
    invalid multiple-open storage instead of trusting one persisted ID and
    choosing it arbitrarily.
-6. The background worker may publish older pending Episodes while the current
+7. The background worker may publish older pending Episodes while the current
    Capture records writes. SQLite WAL and Capture-owned rows make this safe, but
    the end-to-end suite must prove that summary retry does not create write
    starvation.
-7. A crash no longer creates a second Capture. Reattaching the same open Capture
+8. A crash no longer creates a second Capture. Reattaching the same open Capture
    preserves the intended coarse Episode boundary now that downtime filesystem
    changes cannot enter through Git reconciliation.
-8. Git remains in the end-to-end harness only because Repository identity is
+9. Git remains in the end-to-end harness only because Repository identity is
    Git-based. Dirty-start, staged, commit, and branch-switch attribution tests
    were removed because v0.1 deliberately ignores those unstructured changes.
-9. `/madeleine capture` is the explicit way to create multiple Episodes inside
+10. `/madeleine capture` is the explicit way to create multiple Episodes inside
    one long-running Conversation. It shares finalization with shutdown rather
    than introducing a second publication path.
-10. This recovery/MVP plan moved from Plan 11 to Plan 12. Persisted bounded
+11. This recovery/MVP plan moved from Plan 11 to Plan 12. Persisted bounded
    transcripts and evidence retrieval must land first so end-to-end hardening
    validates the final evidence model rather than transcript-file references.
 
