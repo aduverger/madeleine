@@ -232,15 +232,15 @@ A clean shutdown seals the Capture, so a later resume starts a new one. Sealed
 Each is attempted once per runtime, with at most one recovery model call active.
 Recovery is cancelled on shutdown and failures remain pending.
 
-### Manual rollover
+### Manual capture
 
-`/madeleine rollover` waits until Pi is idle, seals the current Capture through
+`/madeleine capture` waits until Pi is idle, seals the current Capture through
 the same finalization path used by session shutdown, and starts a new Capture in
-the same Conversation. Once summary generation is available, successful sealing
-publishes an Episode before reporting completion; a recoverable summary failure
-leaves the old Capture pending while the new Capture records subsequent work.
-The adapter composes the existing `capture.seal` and `capture.start` RPC methods;
-there is no misleadingly atomic rollover method in the core API.
+the same Conversation. Successful sealing publishes an Episode before reporting
+completion; a recoverable summary failure leaves the old Capture pending while
+the new Capture records subsequent work. The adapter composes the existing
+`capture.seal` and `capture.start` RPC methods; there is no misleadingly atomic
+capture method in the core API.
 
 ### Clean summary timeout
 
@@ -248,8 +248,8 @@ Summary generation uses the active Pi model through `ctx.modelRegistry`. Each
 model call has a 30-second abort timeout. A session-scale Capture may require
 several sequential chunk calls plus final synthesis, so the complete attempt can
 take longer. Timeout, missing authentication, invalid JSON, truncated output, or
-an empty response leaves the Capture pending for later automatic or explicit
-retry.
+an empty response leaves the Capture pending for automatic recovery in a later
+runtime.
 
 ## Historical context
 
@@ -659,7 +659,7 @@ reference boundary.
 | D-003 | Use one Episode-level L1/L2 plus persisted bounded Transcript evidence. | Locked | No per-file summaries and no generated L3/L4. |
 | D-004 | Separate Conversation, Capture, and Episode. | Locked | Harness resumes do not overload the historical unit. |
 | D-005 | Keep unfinished Capture facts separate from immutable Episode history. | Locked | Capture activity can later support presence without defining orchestration policy. |
-| D-006 | One Pi work interval produces one Episode; clean shutdown or manual rollover ends the interval. | MVP policy | Episodes span prompts and may survive process restart without becoming session-long by necessity. |
+| D-006 | One Pi work interval produces one Episode; clean shutdown or manual capture ends the interval. | MVP policy | Episodes span prompts and may survive process restart without becoming session-long by necessity. |
 | D-007 | Persist successful writes during the run. | Locked | Crashes retain useful Capture state. Reads are not persisted. |
 | D-008 | SQLite WAL is the sole MVP persistence layer. | Locked | No canonical JSON, journal files, daemon, or alternate backend. |
 | D-009 | Use Git CLI reconciliation as a safety net. | Superseded by D-024 | Exhaustive change detection produced noisy file-to-context associations and lifecycle edge cases. |

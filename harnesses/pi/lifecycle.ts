@@ -14,6 +14,10 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  PendingCaptureRecovery,
+  type RecoveryFinalizer,
+} from "./recovery.ts";
 import type { Capture, FinalizationDraft } from "./rpc.ts";
 import { extractCaptureTranscript, type TranscriptInput } from "./transcript.ts";
 import { PiState, type ConversationIdentity } from "./state.ts";
@@ -36,22 +40,7 @@ export interface RolloverResult {
   startedCaptureID: string;
 }
 
-export type RetryResult = {
-  captureID: string;
-  status: "failed";
-} | {
-  captureID: string;
-  status: "published";
-  episodeID: string;
-};
-
-export interface CaptureFinalizer {
-  finalize(
-    draft: FinalizationDraft,
-    ctx: ExtensionContext,
-    signal?: AbortSignal,
-  ): Promise<EpisodeFinalization>;
-}
+export type CaptureFinalizer = RecoveryFinalizer;
 
 export interface CaptureClient extends SummaryClient {
   startCapture(
@@ -87,6 +76,7 @@ export class CaptureLifecycle {
   private replaceCaptureAfterTree = false;
 
   private readonly finalizer: CaptureFinalizer;
+  private readonly recovery: PendingCaptureRecovery;
 
   constructor(
     private readonly client: CaptureClient,
@@ -96,6 +86,7 @@ export class CaptureLifecycle {
     finalizer?: CaptureFinalizer,
   ) {
     this.finalizer = finalizer ?? new EpisodeFinalizer(client);
+    this.recovery = new PendingCaptureRecovery(client, this.finalizer);
   }
 
   register(pi: ExtensionAPI): void {
@@ -133,40 +124,6 @@ export class CaptureLifecycle {
     }
   }
 
-  async retry(captureID: string | undefined, ctx: ExtensionContext): Promise<RetryResult[]> {
-    if (!this.conversation) throw new Error("Madeleine has no active Conversation");
-    const pending = (await this.client.listPendingCaptures(
-      this.repositoryRoot,
-      this.conversation.externalID,
-    )).filter((capture) => capture.status === "pending_summary");
-    const captures = captureID
-      ? pending.filter((capture) => capture.id === captureID)
-      : pending;
-    if (captureID && captures.length === 0) {
-      throw new Error("Capture is not pending in the current Conversation");
-    }
-
-    const results: RetryResult[] = [];
-    for (const capture of captures) {
-      try {
-        if (!capture.end_cursor) throw new Error("Pending Capture has no end cursor");
-        const draft = await this.client.sealCapture(capture.id, capture.end_cursor);
-        const finalization = await this.finalizer.finalize(draft, ctx);
-        if (finalization.status !== "published") {
-          throw new Error("Pending Capture was unexpectedly abandoned");
-        }
-        results.push({
-          captureID: capture.id,
-          status: "published",
-          episodeID: finalization.episodeID,
-        });
-      } catch {
-        results.push({ captureID: capture.id, status: "failed" });
-      }
-    }
-    return results;
-  }
-
   private async start(event: SessionStartEvent, ctx: ExtensionContext): Promise<void> {
     if (!(await this.ensureReady(ctx))) return;
 
@@ -178,6 +135,17 @@ export class CaptureLifecycle {
 
     try {
       await this.resumeOrCreate(ctx);
+      if (this.captureID && this.conversation) {
+        this.recovery.start(
+          this.repositoryRoot,
+          this.conversation.externalID,
+          this.captureID,
+          ctx,
+          (message) => {
+            if (ctx.hasUI) ctx.ui.notify(message, "warning");
+          },
+        );
+      }
     } catch {
       this.notifyOnce(ctx, "start", "Madeleine could not start write capture for this run.");
     }
@@ -185,18 +153,6 @@ export class CaptureLifecycle {
 
   private async resumeOrCreate(ctx: ExtensionContext): Promise<void> {
     const persistedCaptureID = this.state.currentCaptureID();
-    if (persistedCaptureID) {
-      try {
-        const capture = await this.client.getCapture(persistedCaptureID, this.workController.signal);
-        if (this.isOpenCurrentConversation(capture)) {
-          this.captureID = capture.id;
-          return;
-        }
-      } catch {
-        // Fall back to the canonical pending-Capture query below.
-      }
-    }
-
     const openCaptures = await this.openCapturesForConversation();
     if (openCaptures.length === 1) {
       const captureID = openCaptures[0]!.id;
@@ -231,14 +187,6 @@ export class CaptureLifecycle {
       this.workController.signal,
     );
     return captures.filter((capture) => capture.status === "open");
-  }
-
-  private isOpenCurrentConversation(capture: Capture): boolean {
-    return (
-      capture.status === "open" &&
-      capture.conversation_key.harness === "pi" &&
-      capture.conversation_key.external_id === this.conversation?.externalID
-    );
   }
 
   private async recordMutation(event: ToolResultEvent, ctx: ExtensionContext): Promise<void> {
@@ -332,6 +280,7 @@ export class CaptureLifecycle {
 
   private async shutdown(event: SessionShutdownEvent, ctx: ExtensionContext): Promise<void> {
     this.workController.abort();
+    await this.recovery.stop();
     if (event.reason === "reload" || !this.captureID) return;
 
     try {
