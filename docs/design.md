@@ -122,8 +122,12 @@ paths are removed after successful Episode publication.
 
 ### Transcript
 
-Sanitized semantic evidence for one non-empty sealed Capture. Its versioned
-chronological entries become immutable during sealing. If their projection
+Sanitized semantic evidence for one non-empty sealed Capture. Transcript entry
+kinds and content are Madeleine-domain data, independent of any harness session
+format. Each harness adapter translates its native entries into this canonical
+representation; Episodes and Transcript retrieval can therefore carry history
+between different harnesses. The Transcript's versioned chronological entries
+become immutable during sealing. If their projection
 exceeds the active model's context, Pi creates Capture-specific chronological
 chunk summaries; the exact final compact evidence used for successful L1/L2 is
 frozen atomically with Episode publication. The completed Transcript also stores
@@ -205,6 +209,17 @@ session_start(reason=reload)    -> reattach the same open Capture
 The Capture ID and already-injected paths are persisted through Pi custom
 entries so a reload does not duplicate historical context.
 
+### Tree navigation
+
+Every non-no-op `/tree` navigation is a Capture boundary. Madeleine seals the
+old interval at the source leaf and opens a temporary source Capture before Pi
+runs an optional branch summary. If summarization fails or is cancelled, that
+Capture continues recording on the unchanged branch. After successful
+navigation, Madeleine abandons the unused temporary Capture and starts the
+destination Capture. A generated branch summary is the first semantic entry
+inside that destination boundary. This keeps paths and intent from an abandoned
+branch together instead of mixing them into the destination branch's evidence.
+
 ### Crash and resume
 
 An abrupt exit leaves the current Capture `open`. Opening the same persisted Pi
@@ -269,8 +284,12 @@ Transcript in SQLite. It has two representations of the same evidence:
 - `raw` is the fuller chronological structured entry sequence, paged by stable
   position.
 
-Raw entries include complete user and assistant text, branch summaries,
-authoritative paths, and structured mutation operation/path/status metadata.
+Raw entries use a versioned Madeleine-domain vocabulary: `user`, `assistant`,
+`branch_summary`, and `mutation`. They include complete user and assistant text,
+branch summaries, and structured mutation operation/path/status metadata.
+Authoritative normalized Capture paths are added when rendering compact evidence
+and remain on the Episode. Harness-native entry names and file layouts do not
+cross the adapter boundary.
 Failed mutations retain a short error. Compact evidence is that semantic
 projection when it fits, otherwise ordered Capture-specific summaries of it.
 Both exclude Pi compaction entries, read calls and outputs, write content, edit
@@ -280,8 +299,13 @@ append-only raw messages remain available across compaction, while a compaction
 summary may contain ancestors from before the Capture boundary.
 
 The Pi adapter exposes `madeleine_transcript` for repository-scoped compact or
-raw retrieval. These are evidence views, not generated L3/L4 summaries, and no
-retrieval depends on the original Pi session file.
+raw retrieval. SQLite returns stable position-based pages bounded by both entry
+count and encoded size, except that one indivisible entry is always returned;
+the adapter then exposes the largest complete prefix
+that fits Pi's smaller escaped output bound and points to the first hidden
+entry. Pagination remains visible even when one oversized entry itself must be
+truncated. These are evidence views, not generated L3/L4
+summaries, and no retrieval depends on the original Pi session file.
 
 ### Injection safety
 
@@ -479,8 +503,10 @@ entry: index.ts
 ```
 
 Harness integrations live under `harnesses/<harness>`. Each directory owns
-that harness's lifecycle, tools, bounded Transcript projection, and
-presentation. The versioned Madeleine CLI remains their shared boundary; no
+that harness's lifecycle, native-entry interpretation, canonical bounded
+Transcript projection, tools, and presentation. SQLite and RPC expose the same
+Madeleine-domain Transcript entries and Episodes regardless of their producing
+harness. The versioned Madeleine CLI remains their shared boundary; no
 cross-harness adapter
 framework is introduced before a second implementation demonstrates shared
 code. Each harness owns its packaging under its directory and does not require

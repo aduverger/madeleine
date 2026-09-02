@@ -15,6 +15,7 @@
     "rpc.ts",
     "state.ts",
     "summary.ts",
+    "transcript-tool.ts",
     "transcript.ts",
     "LICENSE",
     "NOTICE"

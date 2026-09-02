@@ -25,7 +25,6 @@ func TestServiceEndToEnd(t *testing.T) {
 	capture, err := service.StartCapture(ctx, StartCaptureRequest{
 		RepositoryRoot:  root,
 		ConversationKey: ConversationKey{Harness: HarnessPi, ExternalID: "service-e2e"},
-		TranscriptRef:   "session.jsonl",
 		StartCursor:     "start",
 	})
 	if err != nil {
@@ -38,13 +37,16 @@ func TestServiceEndToEnd(t *testing.T) {
 	if err := service.RecordWrite(ctx, RecordWriteRequest{CaptureID: capture.ID, Path: "tracked.txt"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.SealCapture(ctx, SealCaptureRequest{CaptureID: capture.ID, EndCursor: "end"}); err != nil {
+	if _, err := service.SealCapture(ctx, SealCaptureRequest{
+		CaptureID: capture.ID, EndCursor: "end", Transcript: testTranscriptInput(),
+	}); err != nil {
 		t.Fatal(err)
 	}
 	episode, err := service.PublishEpisode(ctx, PublishEpisodeRequest{
-		CaptureID: capture.ID,
-		L1:        "Updated the tracked file.",
-		L2:        "The service recorded, sealed, and published the change.",
+		CaptureID:       capture.ID,
+		L1:              "Updated the tracked file.",
+		L2:              "The service recorded, sealed, and published the change.",
+		CompactEvidence: "Service evidence",
 	})
 	if err != nil {
 		t.Fatal(err)

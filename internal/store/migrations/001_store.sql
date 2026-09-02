@@ -19,7 +19,6 @@ CREATE TABLE conversations (
     repository_id TEXT NOT NULL REFERENCES repositories(id),
     harness TEXT NOT NULL,
     external_id TEXT NOT NULL,
-    transcript_ref TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(repository_id, harness, external_id)

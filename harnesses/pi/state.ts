@@ -1,6 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { randomBytes } from "node:crypto";
-import { resolve } from "node:path";
 
 export const stateEntryType = "madeleine-state-v1";
 const boundaryEntryType = "madeleine-boundary-v1";
@@ -14,7 +13,6 @@ export interface PersistedState {
 
 export interface ConversationIdentity {
   externalID: string;
-  transcriptRef: string;
 }
 
 export class PiState {
@@ -29,8 +27,9 @@ export class PiState {
   ) {}
 
   initialize(ctx: ExtensionContext, reason: "startup" | "reload" | "new" | "resume" | "fork"): ConversationIdentity {
-    const sessionFile = ctx.sessionManager.getSessionFile();
-    const persistedExternalID = sessionFile ? resolve(sessionFile) : undefined;
+    const persistedExternalID = ctx.sessionManager.getSessionFile()
+      ? ctx.sessionManager.getSessionId()
+      : undefined;
     const restoresExistingConversation =
       reason === "startup" || reason === "reload" || reason === "resume";
     const restored = restoresExistingConversation ? newestState(ctx, persistedExternalID) : undefined;
@@ -41,10 +40,7 @@ export class PiState {
     for (const path of restored?.injected_paths ?? []) this.injectedPaths.add(path);
     this.inFlightPaths.clear();
 
-    return {
-      externalID: this.externalConversationID,
-      transcriptRef: persistedExternalID ?? "",
-    };
+    return { externalID: this.externalConversationID };
   }
 
   currentCaptureID(): string | undefined {

@@ -54,14 +54,22 @@ func TestOpenMigratesAndReopensStore(t *testing.T) {
 
 	for _, table := range []string{
 		"repositories", "repository_aliases", "conversations", "captures", "capture_paths",
-		"episodes", "episode_files",
+		"transcripts", "transcript_entries", "episodes", "episode_files",
 	} {
 		if !databaseObjectExists(t, reopened.db, "table", table) {
 			t.Errorf("table %q does not exist", table)
 		}
 	}
-	if databaseObjectExists(t, reopened.db, "table", "transcripts") {
-		t.Error("excluded table \"transcripts\" exists")
+	for _, table := range []string{"conversations", "captures", "episodes"} {
+		var count int
+		if err := reopened.db.QueryRow(
+			"SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = 'transcript_ref'", table,
+		).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Errorf("table %q retains transcript_ref", table)
+		}
 	}
 
 	if err := reopened.Close(); err != nil {
@@ -92,10 +100,49 @@ func TestSchemaIndexes(t *testing.T) {
 		"captures_conversation_status_started_idx",
 		"episodes_repository_ended_id_idx",
 		"episode_files_repository_path_episode_idx",
+		"transcripts_repository_id_idx",
 	}
 	for _, index := range indexes {
 		if !databaseObjectExists(t, database.db, "index", index) {
 			t.Errorf("index %q does not exist", index)
+		}
+	}
+}
+
+func TestTranscriptSchemaOwnsEvidenceWithoutFileReferences(t *testing.T) {
+	t.Parallel()
+
+	store := openTestStore(t, t.TempDir())
+	defer store.Close()
+	for table, column := range map[string]string{
+		"captures": "transcript_id",
+		"episodes": "transcript_id",
+	} {
+		var count int
+		if err := store.db.QueryRow(
+			"SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?", table, column,
+		).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Errorf("%s column %q count = %d, want 1", table, column, count)
+		}
+	}
+	for table, columns := range map[string][]string{
+		"conversations": {"transcript_ref"},
+		"captures":      {"transcript_ref"},
+		"episodes":      {"transcript_ref", "start_cursor", "end_cursor"},
+	} {
+		for _, column := range columns {
+			var count int
+			if err := store.db.QueryRow(
+				"SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?", table, column,
+			).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 0 {
+				t.Errorf("%s retains column %q", table, column)
+			}
 		}
 	}
 }

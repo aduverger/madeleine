@@ -3,8 +3,10 @@ import {
   isWriteToolResult,
   type ExtensionAPI,
   type ExtensionContext,
+  type SessionBeforeTreeEvent,
   type SessionShutdownEvent,
   type SessionStartEvent,
+  type SessionTreeEvent,
   type ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
 import { access } from "node:fs/promises";
@@ -13,6 +15,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { Capture, FinalizationDraft } from "./rpc.ts";
+import { extractCaptureTranscript, type TranscriptInput } from "./transcript.ts";
 import { PiState, type ConversationIdentity } from "./state.ts";
 import {
   EpisodeFinalizer,
@@ -54,7 +57,6 @@ export interface CaptureClient extends SummaryClient {
   startCapture(
     repositoryRoot: string,
     externalID: string,
-    transcriptRef: string,
     startCursor: string,
     signal?: AbortSignal,
   ): Promise<Capture>;
@@ -65,7 +67,13 @@ export interface CaptureClient extends SummaryClient {
     signal?: AbortSignal,
   ): Promise<Capture[]>;
   recordWrite(captureID: string, path: string, signal?: AbortSignal): Promise<void>;
-  sealCapture(captureID: string, endCursor: string, signal?: AbortSignal): Promise<FinalizationDraft>;
+  abandonCapture(captureID: string, signal?: AbortSignal): Promise<void>;
+  sealCapture(
+    captureID: string,
+    endCursor: string,
+    transcript?: TranscriptInput,
+    signal?: AbortSignal,
+  ): Promise<FinalizationDraft>;
 }
 
 export class CaptureLifecycle {
@@ -76,6 +84,7 @@ export class CaptureLifecycle {
   private readonly lastPersistedWriteAtByPath = new Map<string, number>();
   private readonly writePathsInFlight = new Set<string>();
   private readonly sentNotifications = new Set<string>();
+  private replaceCaptureAfterTree = false;
 
   private readonly finalizer: CaptureFinalizer;
 
@@ -92,6 +101,8 @@ export class CaptureLifecycle {
   register(pi: ExtensionAPI): void {
     pi.on("session_start", (event, ctx) => this.start(event, ctx));
     pi.on("tool_result", (event, ctx) => this.recordMutation(event, ctx));
+    pi.on("session_before_tree", (event, ctx) => this.beforeTree(event, ctx));
+    pi.on("session_tree", (event, ctx) => this.afterTree(event, ctx));
     pi.on("session_shutdown", (event, ctx) => this.shutdown(event, ctx));
   }
 
@@ -162,6 +173,7 @@ export class CaptureLifecycle {
     this.repositoryRoot = ctx.cwd;
     this.conversation = this.state.initialize(ctx, event.reason);
     this.captureID = undefined;
+    this.replaceCaptureAfterTree = false;
     this.resetCaptureWork();
 
     try {
@@ -199,13 +211,12 @@ export class CaptureLifecycle {
     await this.createCapture(ctx);
   }
 
-  private async createCapture(ctx: ExtensionContext): Promise<void> {
+  private async createCapture(ctx: ExtensionContext, startCursor?: string): Promise<void> {
     if (!this.conversation) return;
     const capture = await this.client.startCapture(
       this.repositoryRoot,
       this.conversation.externalID,
-      this.conversation.transcriptRef,
-      this.state.ensureCursor(ctx),
+      startCursor ?? this.state.ensureCursor(ctx),
       this.workController.signal,
     );
     this.state.attachCapture(capture.id);
@@ -269,6 +280,56 @@ export class CaptureLifecycle {
     }
   }
 
+  private async beforeTree(
+    event: SessionBeforeTreeEvent,
+    ctx: ExtensionContext,
+  ): Promise<{ cancel: true } | undefined> {
+    this.replaceCaptureAfterTree = false;
+    const captureID = this.captureID;
+    if (!captureID) return;
+
+    try {
+      if (!event.preparation.oldLeafId) throw new Error("Pi tree navigation has no source leaf");
+
+      this.workController.abort();
+      const result = await this.sealAndFinalize(
+        captureID,
+        ctx,
+        event.preparation.oldLeafId,
+        event.signal,
+      );
+      if (result.status === "pending") {
+        this.notifyOnce(ctx, "tree-summary", "Madeleine preserved the Capture, but its Episode remains pending.");
+      }
+      this.resetCaptureWork();
+      await this.createCapture(ctx, event.preparation.oldLeafId);
+      this.replaceCaptureAfterTree = true;
+    } catch {
+      if (this.captureID) this.workController = new AbortController();
+      this.notifyOnce(ctx, "tree-seal", "Madeleine could not preserve the current Capture; tree navigation was cancelled.");
+      return { cancel: true };
+    }
+  }
+
+  private async afterTree(event: SessionTreeEvent, ctx: ExtensionContext): Promise<void> {
+    if (!this.replaceCaptureAfterTree) return;
+    this.replaceCaptureAfterTree = false;
+    const sourceCaptureID = this.captureID;
+    try {
+      if (sourceCaptureID) {
+        await this.client.abandonCapture(sourceCaptureID, ctx.signal);
+        this.clearCurrentCapture(sourceCaptureID);
+      }
+      this.resetCaptureWork();
+      const startCursor = event.summaryEntry
+        ? event.summaryEntry.parentId ?? event.summaryEntry.id
+        : event.newLeafId ?? undefined;
+      await this.createCapture(ctx, startCursor);
+    } catch {
+      this.notifyOnce(ctx, "tree-start", "Madeleine could not start write capture on the selected branch.");
+    }
+  }
+
   private async shutdown(event: SessionShutdownEvent, ctx: ExtensionContext): Promise<void> {
     this.workController.abort();
     if (event.reason === "reload" || !this.captureID) return;
@@ -286,11 +347,19 @@ export class CaptureLifecycle {
   private async sealAndFinalize(
     captureID: string,
     ctx: ExtensionContext,
+    endCursor = this.state.ensureCursor(ctx),
+    signal = ctx.signal,
   ): Promise<FinalizationOutcome> {
-    const draft = await this.client.sealCapture(captureID, this.state.ensureCursor(ctx));
+    const capture = await this.client.getCapture(captureID, signal);
+    const transcript = extractCaptureTranscript(
+      ctx.sessionManager.getEntries(),
+      capture.start_cursor,
+      endCursor,
+    );
+    const draft = await this.client.sealCapture(captureID, endCursor, transcript, signal);
     this.clearCurrentCapture(captureID);
     try {
-      return await this.finalizer.finalize(draft, ctx, ctx.signal);
+      return await this.finalizer.finalize(draft, ctx, signal);
     } catch {
       return { captureID, status: "pending" };
     }

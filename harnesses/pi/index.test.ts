@@ -49,8 +49,10 @@ function context(cwd = "/repo", hasUI = true) {
     signal: undefined,
     sessionManager: {
       getSessionFile: () => "/sessions/current.jsonl",
+      getSessionId: () => "018f0000-0000-7000-8000-000000000123",
       getLeafId: () => "leaf-1",
       getBranch: () => [],
+      getEntries: () => [],
     },
     ui: { notify },
   } as unknown as ExtensionContext;
@@ -94,10 +96,9 @@ function captureResult() {
     id: "capture-1",
     repository_id: "repository-1",
     conversation_id: "conversation-1",
-    conversation_key: { harness: "pi", external_id: "/sessions/current.jsonl" },
+    conversation_key: { harness: "pi", external_id: "018f0000-0000-7000-8000-000000000123" },
     worktree_root: "/repo",
     status: "open",
-    transcript_ref: "/sessions/current.jsonl",
     start_cursor: "leaf-1",
     started_at: "2026-01-01T00:00:00Z",
     last_seen_at: "2026-01-01T00:00:00Z",

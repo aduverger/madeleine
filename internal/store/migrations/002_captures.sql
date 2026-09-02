@@ -4,7 +4,7 @@ CREATE TABLE captures (
     repository_id TEXT NOT NULL REFERENCES repositories(id),
     worktree_root TEXT NOT NULL,
     status TEXT NOT NULL CHECK(status IN ('open', 'pending_summary', 'finalized', 'abandoned')),
-    transcript_ref TEXT,
+    transcript_id TEXT UNIQUE REFERENCES transcripts(id),
     start_cursor TEXT,
     end_cursor TEXT,
     started_at TEXT NOT NULL,

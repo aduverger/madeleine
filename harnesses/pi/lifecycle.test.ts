@@ -7,14 +7,22 @@ import {
   type CaptureClient,
   type CaptureFinalizer,
 } from "./lifecycle.ts";
-import type { Capture, Episode, FinalizationDraft } from "./rpc.ts";
+import type { Capture, Episode, FinalizationDraft, TranscriptView } from "./rpc.ts";
+import type { TranscriptInput } from "./transcript.ts";
 import { PiState, stateEntryType } from "./state.ts";
 
 type Handler = (event: any, ctx: ExtensionContext) => Promise<unknown> | unknown;
 
 class FakePi {
   readonly handlers = new Map<string, Handler[]>();
-  readonly entries: any[] = [];
+  readonly entries: any[] = [{
+    type: "custom",
+    id: "leaf-1",
+    parentId: null,
+    timestamp: "2026-01-01T00:00:00Z",
+    customType: "test-boundary",
+    data: {},
+  }];
   leaf: string | null = "leaf-1";
 
   readonly api = {
@@ -33,6 +41,12 @@ class FakePi {
   async emit(event: string, payload: unknown, ctx: ExtensionContext): Promise<void> {
     for (const handler of this.handlers.get(event) ?? []) await handler(payload, ctx);
   }
+
+  async emitResults(event: string, payload: unknown, ctx: ExtensionContext): Promise<unknown[]> {
+    const results: unknown[] = [];
+    for (const handler of this.handlers.get(event) ?? []) results.push(await handler(payload, ctx));
+    return results;
+  }
 }
 
 class FakeClient implements CaptureClient {
@@ -42,17 +56,16 @@ class FakeClient implements CaptureClient {
   emptySeal = false;
   blockWrites = false;
   nextID = 1;
+  sealedTranscript: TranscriptInput | undefined;
 
   async startCapture(
     repositoryRoot: string,
     externalID: string,
-    transcriptRef: string,
     startCursor: string,
   ): Promise<Capture> {
     this.maybeFail("start");
     const capture = captureRecord(`capture-${this.nextID++}`, externalID, {
       worktree_root: repositoryRoot,
-      transcript_ref: transcriptRef || undefined,
       start_cursor: startCursor,
     });
     this.captures.push(capture);
@@ -88,21 +101,55 @@ class FakeClient implements CaptureClient {
     });
   }
 
-  async sealCapture(captureID: string, endCursor: string): Promise<FinalizationDraft> {
+  async abandonCapture(captureID: string): Promise<void> {
+    this.maybeFail("abandon");
+    this.calls.push({ method: "abandon", captureID });
+    const capture = this.captures.find((candidate) => candidate.id === captureID)!;
+    capture.status = "abandoned";
+  }
+
+  async sealCapture(
+    captureID: string,
+    endCursor: string,
+    transcript?: TranscriptInput,
+  ): Promise<FinalizationDraft> {
     this.maybeFail("seal");
     this.calls.push({ method: "seal", captureID });
+    this.sealedTranscript = transcript;
     const capture = this.captures.find((candidate) => candidate.id === captureID)!;
     capture.status = this.emptySeal ? "abandoned" : "pending_summary";
     capture.end_cursor = endCursor;
+    capture.transcript_id = this.emptySeal ? undefined : `transcript-${captureID}`;
     return {
       capture_id: captureID,
+      transcript_id: capture.transcript_id,
       status: capture.status,
       empty: this.emptySeal,
       paths: this.emptySeal ? [] : ["src/a.ts"],
     };
   }
 
-  async publishEpisode(captureID: string, l1: string, l2: string): Promise<Episode> {
+  async getTranscript(
+    _repositoryRoot: string,
+    transcriptID: string,
+    view: "compact" | "raw",
+    _offset?: number,
+  ): Promise<TranscriptView> {
+    this.maybeFail("transcript");
+    this.calls.push({ method: "transcript" });
+    return {
+      transcript_id: transcriptID,
+      view,
+      entries: [{ kind: "user", text: "Test evidence" }],
+    };
+  }
+
+  async publishEpisode(
+    captureID: string,
+    l1: string,
+    l2: string,
+    _compactEvidence: string,
+  ): Promise<Episode> {
     this.maybeFail("publish");
     this.calls.push({ method: "publish", captureID });
     const capture = this.captures.find((candidate) => candidate.id === captureID)!;
@@ -127,8 +174,7 @@ function episodeRecord(capture: Capture, l1: string, l2: string): Episode {
     paths: ["src/a.ts"],
     l1,
     l2,
-    start_cursor: capture.start_cursor,
-    end_cursor: capture.end_cursor!,
+    transcript_id: capture.transcript_id!,
     started_at: capture.started_at,
     ended_at: "2026-01-01T00:01:00Z",
     created_at: "2026-01-01T00:01:01Z",
@@ -159,12 +205,13 @@ function testContext(pi: FakePi, sessionFile = "/sessions/current.jsonl") {
     ui: { notify },
     sessionManager: {
       getSessionFile: () => sessionFile,
+      getSessionId: () => "018f0000-0000-7000-8000-000000000123",
       getLeafId: () => pi.leaf,
       getBranch: () => pi.entries,
       getEntries: () => pi.entries,
     },
   } as unknown as ExtensionContext;
-  return { ctx, notify, externalID: resolve(sessionFile) };
+  return { ctx, notify, externalID: "018f0000-0000-7000-8000-000000000123" };
 }
 
 function setup(
@@ -178,6 +225,47 @@ function setup(
   lifecycle.register(pi.api);
   const context = testContext(pi);
   return { pi, client, state, lifecycle, ...context };
+}
+
+function addCaptureAncestor(pi: FakePi): void {
+  pi.entries[0]!.parentId = "before-capture";
+  pi.entries.unshift({
+    type: "custom",
+    id: "before-capture",
+    parentId: null,
+    timestamp: "2026-01-01T00:00:00Z",
+    customType: "older-boundary",
+    data: {},
+  });
+}
+
+function appendWriteExchange(pi: FakePi, id: string, path: string): void {
+  const toolCallID = `${id}-call`;
+  pi.entries.push({
+    type: "message",
+    id: `${id}-assistant`,
+    parentId: pi.leaf,
+    timestamp: "2026-01-01T00:00:01Z",
+    message: {
+      role: "assistant",
+      content: [{ type: "toolCall", id: toolCallID, name: "write", arguments: { path } }],
+    },
+  });
+  pi.leaf = `${id}-assistant`;
+  pi.entries.push({
+    type: "message",
+    id: `${id}-result`,
+    parentId: pi.leaf,
+    timestamp: "2026-01-01T00:00:02Z",
+    message: {
+      role: "toolResult",
+      toolCallId: toolCallID,
+      toolName: "write",
+      content: [{ type: "text", text: "written" }],
+      isError: false,
+    },
+  });
+  pi.leaf = `${id}-result`;
 }
 
 function mutation(toolName: string, path: unknown, isError = false) {
@@ -253,7 +341,7 @@ describe("Capture lifecycle", () => {
     expect(client.calls.map((call) => call.method)).toEqual(["list"]);
     expect(lifecycle.currentCaptureID()).toBe("capture-existing");
     expect(state.claimPath("src/a.ts")).toBe(false);
-    expect(pi.entries).toHaveLength(1);
+    expect(pi.entries).toHaveLength(2);
   });
 
   it.each(["reload", "resume"] as const)(
@@ -282,6 +370,49 @@ describe("Capture lifecycle", () => {
     },
   );
 
+  it("submits canonical bounded entries while sealing", async () => {
+    const { pi, client, ctx } = setup();
+    await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
+    const callID = "write-call";
+    pi.entries.push({
+      type: "message",
+      id: "assistant-call",
+      parentId: pi.leaf,
+      timestamp: "2026-01-01T00:00:01Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: callID, name: "write", arguments: { path: "src/a.ts", content: "secret" } }],
+      },
+    });
+    pi.leaf = "assistant-call";
+    pi.entries.push({
+      type: "message",
+      id: "write-result",
+      parentId: pi.leaf,
+      timestamp: "2026-01-01T00:00:02Z",
+      message: {
+        role: "toolResult",
+        toolCallId: callID,
+        toolName: "write",
+        content: [{ type: "text", text: "written" }],
+        isError: false,
+      },
+    });
+    pi.leaf = "write-result";
+
+    await pi.emit("session_shutdown", { type: "session_shutdown", reason: "quit" }, ctx);
+
+    expect(client.sealedTranscript).toEqual({
+      format_version: 1,
+      entries: [{
+        kind: "mutation",
+        operation: "write",
+        path: "src/a.ts",
+        status: "success",
+      }],
+    });
+  });
+
   it("publishes on every clean shutdown reason", async () => {
     for (const reason of ["quit", "new", "resume", "fork"] as const) {
       const finalize = vi.fn(async (sealed: FinalizationDraft) => ({
@@ -306,9 +437,198 @@ describe("Capture lifecycle", () => {
       finalization: { captureID: "capture-1", status: "pending" },
       startedCaptureID: "capture-2",
     });
-    expect(client.calls.map((call) => call.method)).toEqual(["list", "start", "seal", "get", "start"]);
+    expect(client.calls.map((call) => call.method)).toEqual([
+      "list", "start", "get", "seal", "transcript", "start",
+    ]);
     expect(client.captures[1]?.conversation_key.external_id).toBe(externalID);
     expect(lifecycle.currentCaptureID()).toBe("capture-2");
+  });
+
+  it.each([false, true])(
+    "seals before tree navigation and starts again with summary=%s",
+    async (withSummary) => {
+      const finalize = vi.fn(async (sealed: FinalizationDraft) => ({
+        captureID: sealed.capture_id,
+        status: "published" as const,
+        episodeID: `episode-${sealed.capture_id}`,
+      }));
+      const { pi, client, lifecycle, ctx } = setup(() => 0, { finalize });
+      addCaptureAncestor(pi);
+      await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
+
+      appendWriteExchange(pi, "first", "src/first.ts");
+      await pi.emit("tool_result", mutation("write", "src/first.ts"), ctx);
+      const oldLeafId = pi.leaf;
+      const navigation = await pi.emitResults("session_before_tree", {
+        type: "session_before_tree",
+        preparation: {
+          targetId: "before-capture",
+          oldLeafId,
+          commonAncestorId: "before-capture",
+          entriesToSummarize: [],
+          userWantsSummary: withSummary,
+        },
+        signal: new AbortController().signal,
+      }, ctx);
+      expect(navigation).toEqual([undefined]);
+      expect(client.captures[0]?.end_cursor).toBe(oldLeafId);
+
+      pi.leaf = "before-capture";
+      let summaryEntry: any;
+      if (withSummary) {
+        summaryEntry = {
+          type: "branch_summary",
+          id: "tree-summary",
+          parentId: "before-capture",
+          timestamp: "2026-01-01T00:00:03Z",
+          fromId: oldLeafId,
+          summary: "The first branch changed src/first.ts.",
+        };
+        pi.entries.push(summaryEntry);
+        pi.leaf = summaryEntry.id;
+      }
+      await pi.emit("session_tree", {
+        type: "session_tree",
+        newLeafId: pi.leaf,
+        oldLeafId,
+        summaryEntry,
+      }, ctx);
+      expect(client.captures[1]?.status).toBe("abandoned");
+      expect(lifecycle.currentCaptureID()).toBe("capture-3");
+
+      appendWriteExchange(pi, "second", "src/second.ts");
+      await pi.emit("tool_result", mutation("write", "src/second.ts"), ctx);
+      await pi.emit("session_shutdown", { type: "session_shutdown", reason: "quit" }, ctx);
+
+      expect(client.calls.filter((call) => call.method === "seal")).toHaveLength(2);
+      expect(client.calls.filter((call) => call.method === "record")).toEqual([
+        expect.objectContaining({ captureID: "capture-1" }),
+        expect.objectContaining({ captureID: "capture-3" }),
+      ]);
+      if (withSummary) {
+        expect(client.sealedTranscript?.entries[0]).toEqual({
+          kind: "branch_summary",
+          text: "The first branch changed src/first.ts.",
+        });
+      }
+      expect(lifecycle.currentCaptureID()).toBeUndefined();
+    },
+  );
+
+  it.each(["aborted", "failed"])(
+    "keeps capturing on the source branch when tree summarization is %s",
+    async (outcome) => {
+      const finalize = vi.fn(async (sealed: FinalizationDraft) => ({
+        captureID: sealed.capture_id,
+        status: "published" as const,
+        episodeID: `episode-${sealed.capture_id}`,
+      }));
+      const { pi, client, lifecycle, ctx } = setup(() => 0, { finalize });
+      addCaptureAncestor(pi);
+      await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
+      appendWriteExchange(pi, "first", "src/first.ts");
+      await pi.emit("tool_result", mutation("write", "src/first.ts"), ctx);
+      const controller = new AbortController();
+
+      await pi.emit("session_before_tree", {
+        type: "session_before_tree",
+        preparation: {
+          targetId: "before-capture",
+          oldLeafId: pi.leaf,
+          commonAncestorId: "before-capture",
+          entriesToSummarize: [],
+          userWantsSummary: true,
+        },
+        signal: controller.signal,
+      }, ctx);
+      if (outcome === "aborted") controller.abort();
+
+      expect(lifecycle.currentCaptureID()).toBe("capture-2");
+      appendWriteExchange(pi, "continued", "src/continued.ts");
+      await pi.emit("tool_result", mutation("write", "src/continued.ts"), ctx);
+      await pi.emit("session_shutdown", { type: "session_shutdown", reason: "quit" }, ctx);
+
+      expect(client.calls).toContainEqual(expect.objectContaining({
+        method: "record",
+        captureID: "capture-2",
+      }));
+      expect(client.calls.filter((call) => call.method === "seal")).toHaveLength(2);
+    },
+  );
+
+  it("finalizes before an in-boundary rewind and cleanly seals the destination", async () => {
+    const finalize = vi.fn(async (sealed: FinalizationDraft) => ({
+      captureID: sealed.capture_id,
+      status: "published" as const,
+      episodeID: `episode-${sealed.capture_id}`,
+    }));
+    const { pi, client, lifecycle, ctx } = setup(() => 0, { finalize });
+    await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
+    const captureBoundary = pi.leaf;
+    pi.entries.push({
+      type: "message",
+      id: "first-user",
+      parentId: captureBoundary,
+      timestamp: "2026-01-01T00:00:00Z",
+      message: { role: "user", content: "change src/first.ts", timestamp: 0 },
+    });
+    pi.leaf = "first-user";
+    appendWriteExchange(pi, "first", "src/first.ts");
+    await pi.emit("tool_result", mutation("write", "src/first.ts"), ctx);
+
+    await pi.emit("session_before_tree", {
+      type: "session_before_tree",
+      preparation: {
+        targetId: "first-user",
+        oldLeafId: pi.leaf,
+        commonAncestorId: "first-user",
+        entriesToSummarize: [],
+        userWantsSummary: false,
+      },
+      signal: new AbortController().signal,
+    }, ctx);
+    expect(client.sealedTranscript?.entries).toEqual([
+      { kind: "user", text: "change src/first.ts" },
+      { kind: "mutation", operation: "write", path: "src/first.ts", status: "success" },
+    ]);
+
+    pi.leaf = captureBoundary;
+    await pi.emit("session_tree", {
+      type: "session_tree",
+      newLeafId: captureBoundary,
+      oldLeafId: "first-result",
+    }, ctx);
+    client.emptySeal = true;
+    await pi.emit("session_shutdown", { type: "session_shutdown", reason: "quit" }, ctx);
+
+    expect(client.calls.filter((call) => call.method === "seal")).toHaveLength(2);
+    expect(client.captures[0]?.status).toBe("pending_summary");
+    expect(client.captures[1]?.status).toBe("abandoned");
+    expect(client.captures[2]?.status).toBe("abandoned");
+    expect(lifecycle.currentCaptureID()).toBeUndefined();
+  });
+
+  it("cancels tree navigation when the active Capture cannot be sealed", async () => {
+    const { pi, client, lifecycle, ctx } = setup();
+    addCaptureAncestor(pi);
+    await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
+    appendWriteExchange(pi, "first", "src/first.ts");
+    client.fail.add("seal");
+
+    const results = await pi.emitResults("session_before_tree", {
+      type: "session_before_tree",
+      preparation: {
+        targetId: "before-capture",
+        oldLeafId: pi.leaf,
+        commonAncestorId: "before-capture",
+        entriesToSummarize: [],
+        userWantsSummary: false,
+      },
+      signal: new AbortController().signal,
+    }, ctx);
+
+    expect(results).toEqual([{ cancel: true }]);
+    expect(lifecycle.currentCaptureID()).toBe("capture-1");
   });
 
   it("publishes before starting the rollover replacement", async () => {
@@ -328,7 +648,17 @@ describe("Capture lifecycle", () => {
       },
       startedCaptureID: "capture-2",
     });
-    expect(client.calls.map((call) => call.method)).toEqual(["list", "start", "seal", "start"]);
+    expect(client.calls.map((call) => call.method)).toEqual(["list", "start", "get", "seal", "start"]);
+  });
+
+  it("keeps the Capture open when bounded projection fails before sealing", async () => {
+    const { pi, client, lifecycle, ctx } = setup();
+    await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
+    client.captures[0]!.start_cursor = "missing-start";
+
+    await expect(lifecycle.rollover(ctx)).rejects.toThrow("start cursor");
+    expect(lifecycle.currentCaptureID()).toBe("capture-1");
+    expect(client.calls.some((call) => call.method === "seal")).toBe(false);
   });
 
   it("keeps the current Capture usable when rollover sealing fails", async () => {
@@ -441,7 +771,9 @@ describe("Capture lifecycle", () => {
     await pi.emit("session_shutdown", { type: "session_shutdown", reason: "quit" }, ctx);
     await expect(write).resolves.toBeUndefined();
 
-    expect(client.calls.map((call) => call.method)).toEqual(["list", "start", "record", "seal", "get"]);
+    expect(client.calls.map((call) => call.method)).toEqual([
+      "list", "start", "record", "get", "seal", "transcript",
+    ]);
   });
 
   it("treats an empty seal as successful abandonment", async () => {

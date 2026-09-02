@@ -30,8 +30,7 @@ func TestEveryRPCMethod(t *testing.T) {
 		ConversationKey: madeleine.ConversationKey{
 			Harness: madeleine.HarnessPi, ExternalID: "conversation-1",
 		},
-		TranscriptRef: "transcript.jsonl",
-		StartCursor:   "entry-1",
+		StartCursor: "entry-1",
 	})
 	var capture madeleine.Capture
 	decodeResult(t, start, &capture)
@@ -70,6 +69,10 @@ func TestEveryRPCMethod(t *testing.T) {
 	sealed := callRPC(t, ctx, home, "capture.seal", madeleine.SealCaptureRequest{
 		CaptureID: capture.ID,
 		EndCursor: "entry-2",
+		Transcript: &madeleine.TranscriptInput{
+			FormatVersion: madeleine.TranscriptFormatVersion,
+			Entries:       []madeleine.TranscriptEntry{{Kind: madeleine.TranscriptEntryUser, Text: "RPC evidence"}},
+		},
 	})
 	var draft madeleine.FinalizationDraft
 	decodeResult(t, sealed, &draft)
@@ -78,9 +81,10 @@ func TestEveryRPCMethod(t *testing.T) {
 	}
 
 	published := callRPC(t, ctx, home, "episode.publish", madeleine.PublishEpisodeRequest{
-		CaptureID: capture.ID,
-		L1:        "Changed a path to verify RPC dispatch.",
-		L2:        "The integration test invokes every RPC method through a fresh service.",
+		CaptureID:       capture.ID,
+		L1:              "Changed a path to verify RPC dispatch.",
+		L2:              "The integration test invokes every RPC method through a fresh service.",
+		CompactEvidence: "RPC compact evidence",
 	})
 	var episode madeleine.Episode
 	decodeResult(t, published, &episode)
@@ -101,8 +105,19 @@ func TestEveryRPCMethod(t *testing.T) {
 	})
 	var detail madeleine.EpisodeDetail
 	decodeResult(t, detailResponse, &detail)
-	if detail.EpisodeID != episode.ID {
-		t.Fatalf("detail Episode ID = %q, want %q", detail.EpisodeID, episode.ID)
+	if detail.EpisodeID != episode.ID || detail.TranscriptID != episode.TranscriptID {
+		t.Fatalf("detail = %#v, want Episode %q Transcript %q", detail, episode.ID, episode.TranscriptID)
+	}
+
+	transcriptResponse := callRPC(t, ctx, home, "transcript.get", madeleine.TranscriptRequest{
+		RepositoryRoot: repository,
+		TranscriptID:   episode.TranscriptID,
+		View:           madeleine.TranscriptViewCompact,
+	})
+	var transcript madeleine.TranscriptView
+	decodeResult(t, transcriptResponse, &transcript)
+	if transcript.Compact != "RPC compact evidence" {
+		t.Fatalf("compact Transcript = %q", transcript.Compact)
 	}
 
 	secondStart := callRPC(t, ctx, home, "capture.start", madeleine.StartCaptureRequest{
@@ -117,7 +132,92 @@ func TestEveryRPCMethod(t *testing.T) {
 	callRPC(t, ctx, home, "capture.abandon", captureReference{CaptureID: secondCapture.ID})
 }
 
+func TestRawTranscriptRPCPagesStayBelowAdapterOutputCap(t *testing.T) {
+	repository := initializeTestRepository(t, filepath.Join(t.TempDir(), "repository"))
+	home := filepath.Join(t.TempDir(), "home")
+	ctx := context.Background()
+	service, err := madeleine.Open(ctx, madeleine.Options{Home: home})
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture, err := service.StartCapture(ctx, madeleine.StartCaptureRequest{
+		RepositoryRoot: repository,
+		ConversationKey: madeleine.ConversationKey{
+			Harness: madeleine.HarnessPi, ExternalID: "large-rpc-page",
+		},
+		StartCursor: "start",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.RecordWrite(ctx, madeleine.RecordWriteRequest{
+		CaptureID: capture.ID, Path: filepath.Join(capture.WorktreeRoot, "large.txt"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	const adapterOutputCap = 16 * 1024 * 1024
+	entries := make([]madeleine.TranscriptEntry, 50)
+	for index := range entries {
+		entries[index] = madeleine.TranscriptEntry{
+			Kind: madeleine.TranscriptEntryUser,
+			Text: strings.Repeat("x", 400*1024),
+		}
+	}
+	if len(entries)*len(entries[0].Text) <= adapterOutputCap {
+		t.Fatal("test Transcript does not exceed the adapter output cap")
+	}
+	draft, err := service.SealCapture(ctx, madeleine.SealCaptureRequest{
+		CaptureID: capture.ID,
+		EndCursor: "end",
+		Transcript: &madeleine.TranscriptInput{
+			FormatVersion: madeleine.TranscriptFormatVersion,
+			Entries:       entries,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	offset := 0
+	retrieved := 0
+	pages := 0
+	for {
+		response, outputBytes := callRPCSized(t, ctx, home, "transcript.get", madeleine.TranscriptRequest{
+			RepositoryRoot: repository,
+			TranscriptID:   draft.TranscriptID,
+			View:           madeleine.TranscriptViewRaw,
+			Offset:         offset,
+		})
+		if outputBytes >= adapterOutputCap {
+			t.Fatalf("raw RPC page = %d bytes, want below %d", outputBytes, adapterOutputCap)
+		}
+		var page madeleine.TranscriptView
+		decodeResult(t, response, &page)
+		retrieved += len(page.Entries)
+		pages++
+		if page.NextOffset == nil {
+			break
+		}
+		if *page.NextOffset <= offset {
+			t.Fatalf("next offset = %d after %d", *page.NextOffset, offset)
+		}
+		offset = *page.NextOffset
+	}
+	if retrieved != len(entries) || pages < 2 {
+		t.Fatalf("retrieved %d entries in %d pages, want %d entries in multiple pages", retrieved, pages, len(entries))
+	}
+}
+
 func callRPC(t *testing.T, ctx context.Context, home, method string, params any) decodedResponse {
+	t.Helper()
+	response, _ := callRPCSized(t, ctx, home, method, params)
+	return response
+}
+
+func callRPCSized(t *testing.T, ctx context.Context, home, method string, params any) (decodedResponse, int) {
 	t.Helper()
 	request, err := json.Marshal(struct {
 		ProtocolVersion int `json:"protocol_version"`
@@ -146,7 +246,7 @@ func callRPC(t *testing.T, ctx context.Context, home, method string, params any)
 	if response.ProtocolVersion != ProtocolVersion || !response.OK || response.Error != nil {
 		t.Fatalf("%s response = %#v", method, response)
 	}
-	return response
+	return response, output.Len()
 }
 
 func decodeResult(t *testing.T, response decodedResponse, destination any) {

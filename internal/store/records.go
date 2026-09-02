@@ -14,7 +14,7 @@ type CaptureRecord struct {
 	ExternalID     string
 	WorktreeRoot   string
 	Status         string
-	TranscriptRef  string
+	TranscriptID   string
 	StartCursor    string
 	EndCursor      string
 	StartedAt      time.Time
@@ -23,19 +23,37 @@ type CaptureRecord struct {
 	EpisodeID      string
 }
 
+type TranscriptRecord struct {
+	ID                string
+	CaptureID         string
+	RepositoryID      string
+	ConversationID    string
+	Harness           string
+	FormatVersion     int
+	SourceStartCursor string
+	SourceEndCursor   string
+	CompactText       *string
+	CreatedAt         time.Time
+	PublishedAt       *time.Time
+}
+
+type TranscriptEntryRecord struct {
+	Position    int
+	Kind        string
+	ContentJSON string
+}
+
 type EpisodeRecord struct {
 	ID             string
 	CaptureID      string
 	RepositoryID   string
 	ConversationID string
+	TranscriptID   string
 	Harness        string
 	ExternalID     string
 	Paths          []string
 	L1             string
 	L2             string
-	TranscriptRef  string
-	StartCursor    string
-	EndCursor      string
 	StartedAt      time.Time
 	EndedAt        time.Time
 	CreatedAt      time.Time

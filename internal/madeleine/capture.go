@@ -3,6 +3,7 @@ package madeleine
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/aduverger/madeleine/internal/repopath"
 	"github.com/aduverger/madeleine/internal/store"
@@ -52,9 +53,7 @@ func (s *Service) StartCapture(ctx context.Context, request StartCaptureRequest)
 	if err != nil {
 		return Capture{}, err
 	}
-	conversationID, err := s.getOrCreateConversation(
-		ctx, repository.ID, request.ConversationKey, request.TranscriptRef,
-	)
+	conversationID, err := s.getOrCreateConversation(ctx, repository.ID, request.ConversationKey)
 	if err != nil {
 		return Capture{}, err
 	}
@@ -72,7 +71,6 @@ func (s *Service) StartCapture(ctx context.Context, request StartCaptureRequest)
 		ExternalID:     request.ConversationKey.ExternalID,
 		WorktreeRoot:   repository.WorktreeRoot,
 		Status:         string(CaptureStatusOpen),
-		TranscriptRef:  request.TranscriptRef,
 		StartCursor:    request.StartCursor,
 		StartedAt:      now,
 		LastSeenAt:     now,
@@ -99,7 +97,6 @@ func (s *Service) getOrCreateConversation(
 	ctx context.Context,
 	repositoryID RepositoryID,
 	key ConversationKey,
-	transcriptRef string,
 ) (ConversationID, error) {
 	if key.Harness == "" || key.ExternalID == "" {
 		return "", wrapError("get or create conversation", key.ExternalID, ErrInvalidState)
@@ -115,10 +112,7 @@ func (s *Service) getOrCreateConversation(
 		}
 		if found {
 			conversationID = ConversationID(id)
-			if transcriptRef == "" {
-				return nil
-			}
-			return transaction.UpdateConversationTranscript(ctx, id, transcriptRef, nowUTC())
+			return nil
 		}
 
 		conversationID, err = newConversationID()
@@ -127,7 +121,7 @@ func (s *Service) getOrCreateConversation(
 		}
 		return transaction.InsertConversation(
 			ctx, string(conversationID), string(repositoryID), string(key.Harness),
-			key.ExternalID, transcriptRef, nowUTC(),
+			key.ExternalID, nowUTC(),
 		)
 	})
 	if err != nil {
@@ -206,7 +200,7 @@ func (s *Service) ListPendingCaptures(ctx context.Context, query PendingCaptureQ
 }
 
 func (s *Service) SealCapture(ctx context.Context, request SealCaptureRequest) (FinalizationDraft, error) {
-	if request.EndCursor == "" {
+	if request.CaptureID == "" || request.EndCursor == "" {
 		return FinalizationDraft{}, wrapError("seal capture", string(request.CaptureID), ErrInvalidState)
 	}
 
@@ -228,28 +222,24 @@ func (s *Service) SealCapture(ctx context.Context, request SealCaptureRequest) (
 		if err != nil {
 			return err
 		}
-		if status == CaptureStatusOpen {
-			updated, err := transaction.SealCapture(
-				ctx, capture.ID, string(CaptureStatusOpen), string(nextStatus), request.EndCursor, nowUTC(),
-			)
-			if err != nil {
+
+		switch status {
+		case CaptureStatusOpen:
+			if err := sealOpenCapture(ctx, transaction, &capture, nextStatus, request); err != nil {
 				return err
 			}
-			if !updated {
-				return fmt.Errorf("%w: Capture changed during sealing", ErrConflict)
-			}
-			if nextStatus == CaptureStatusAbandoned {
-				if err := transaction.DeleteCaptureRawState(ctx, capture.ID); err != nil {
-					return err
-				}
+		case CaptureStatusPendingSummary, CaptureStatusFinalized:
+			if err := validateRepeatedSeal(ctx, transaction, capture, request); err != nil {
+				return err
 			}
 		}
 
 		draft = FinalizationDraft{
-			CaptureID: request.CaptureID,
-			Status:    nextStatus,
-			Empty:     nextStatus == CaptureStatusAbandoned,
-			Paths:     []string{},
+			CaptureID:    request.CaptureID,
+			TranscriptID: TranscriptID(capture.TranscriptID),
+			Status:       nextStatus,
+			Empty:        nextStatus == CaptureStatusAbandoned,
+			Paths:        []string{},
 		}
 		if nextStatus == CaptureStatusPendingSummary {
 			draft.Paths = paths
@@ -263,6 +253,101 @@ func (s *Service) SealCapture(ctx context.Context, request SealCaptureRequest) (
 		return FinalizationDraft{}, wrapError("seal capture", string(request.CaptureID), err)
 	}
 	return draft, nil
+}
+
+func sealOpenCapture(
+	ctx context.Context,
+	transaction *store.Tx,
+	capture *store.CaptureRecord,
+	nextStatus CaptureStatus,
+	request SealCaptureRequest,
+) error {
+	now := nowUTC()
+	if nextStatus == CaptureStatusPendingSummary {
+		transcriptID, err := insertCaptureTranscript(ctx, transaction, *capture, request, now)
+		if err != nil {
+			return err
+		}
+		capture.TranscriptID = string(transcriptID)
+	}
+	updated, err := transaction.SealCapture(
+		ctx, capture.ID, string(CaptureStatusOpen), string(nextStatus), request.EndCursor,
+		capture.TranscriptID, now,
+	)
+	if err != nil {
+		return err
+	}
+	if !updated {
+		return fmt.Errorf("%w: Capture changed during sealing", ErrConflict)
+	}
+	if nextStatus == CaptureStatusAbandoned {
+		return transaction.DeleteCapturePaths(ctx, capture.ID)
+	}
+	return nil
+}
+
+func insertCaptureTranscript(
+	ctx context.Context,
+	transaction *store.Tx,
+	capture store.CaptureRecord,
+	request SealCaptureRequest,
+	createdAt time.Time,
+) (TranscriptID, error) {
+	if err := validateTranscriptInput(request.Transcript); err != nil {
+		return "", err
+	}
+	transcriptID, err := newTranscriptID()
+	if err != nil {
+		return "", err
+	}
+	entries, err := encodeTranscriptEntries(request.Transcript.Entries)
+	if err != nil {
+		return "", err
+	}
+	return transcriptID, transaction.InsertTranscript(ctx, store.TranscriptRecord{
+		ID:                string(transcriptID),
+		CaptureID:         capture.ID,
+		RepositoryID:      capture.RepositoryID,
+		ConversationID:    capture.ConversationID,
+		Harness:           capture.Harness,
+		FormatVersion:     request.Transcript.FormatVersion,
+		SourceStartCursor: capture.StartCursor,
+		SourceEndCursor:   request.EndCursor,
+		CreatedAt:         createdAt,
+	}, entries)
+}
+
+func validateRepeatedSeal(
+	ctx context.Context,
+	transaction *store.Tx,
+	capture store.CaptureRecord,
+	request SealCaptureRequest,
+) error {
+	transcript, found, err := transaction.GetTranscriptByCapture(ctx, capture.ID)
+	if err != nil {
+		return err
+	}
+	if !found || capture.TranscriptID == "" || transcript.ID != capture.TranscriptID {
+		return fmt.Errorf("%w: sealed Capture has no Transcript", ErrInvalidState)
+	}
+	if request.EndCursor != transcript.SourceEndCursor {
+		return fmt.Errorf("%w: Capture was sealed with different Transcript evidence", ErrConflict)
+	}
+	if request.Transcript == nil {
+		return nil
+	}
+	entries, err := transaction.TranscriptEntries(ctx, transcript.ID)
+	if err != nil {
+		return err
+	}
+	matches, err := transcriptInputMatches(*request.Transcript, transcript, entries)
+	if err != nil {
+		return err
+	}
+	if !matches {
+		return fmt.Errorf("%w: Capture was sealed with different Transcript evidence", ErrConflict)
+	}
+	return nil
 }
 
 func (s *Service) AbandonCapture(ctx context.Context, captureID CaptureID) error {
@@ -279,8 +364,13 @@ func (s *Service) AbandonCapture(ctx context.Context, captureID CaptureID) error
 		if err != nil {
 			return err
 		}
-		if err := transaction.DeleteCaptureRawState(ctx, capture.ID); err != nil {
+		if err := transaction.DeleteCapturePaths(ctx, capture.ID); err != nil {
 			return err
+		}
+		if status == CaptureStatusPendingSummary {
+			if err := transaction.DeleteCaptureTranscript(ctx, capture.ID); err != nil {
+				return err
+			}
 		}
 		if nextStatus == status {
 			return nil

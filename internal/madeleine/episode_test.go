@@ -23,9 +23,10 @@ func TestPublishEpisodeFinalizesCaptureAtomically(t *testing.T) {
 	}
 
 	episode, err := store.PublishEpisode(context.Background(), PublishEpisodeRequest{
-		CaptureID: capture.ID,
-		L1:        "  Added atomic Episode publication.  ",
-		L2:        "\nPublished summaries and exact paths in one transaction.\n",
+		CaptureID:       capture.ID,
+		L1:              "  Added atomic Episode publication.  ",
+		L2:              "\nPublished summaries and exact paths in one transaction.\n",
+		CompactEvidence: "Exact compact evidence",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -36,11 +37,8 @@ func TestPublishEpisodeFinalizesCaptureAtomically(t *testing.T) {
 	if episode.ConversationID != capture.ConversationID || episode.ConversationKey != capture.ConversationKey {
 		t.Fatalf("Episode Conversation = %#v, want %#v", episode.ConversationKey, capture.ConversationKey)
 	}
-	if episode.Harness != HarnessPi || episode.TranscriptRef != capture.TranscriptRef {
-		t.Fatalf("Episode harness/transcript = %q/%q", episode.Harness, episode.TranscriptRef)
-	}
-	if episode.StartCursor != capture.StartCursor || episode.EndCursor != sealed.EndCursor {
-		t.Fatalf("Episode cursors = %q/%q", episode.StartCursor, episode.EndCursor)
+	if episode.Harness != HarnessPi || episode.TranscriptID == "" || episode.TranscriptID != sealed.TranscriptID {
+		t.Fatalf("Episode harness/Transcript = %q/%q", episode.Harness, episode.TranscriptID)
 	}
 	if !episode.StartedAt.Equal(capture.StartedAt) || !episode.EndedAt.Equal(*sealed.EndedAt) {
 		t.Fatalf("Episode times = %v/%v, want %v/%v", episode.StartedAt, episode.EndedAt, capture.StartedAt, sealed.EndedAt)
@@ -71,7 +69,7 @@ func TestPublishEpisodeFinalizesCaptureAtomically(t *testing.T) {
 	if rawPathCount != 0 {
 		t.Fatalf("raw Capture path count = %d, want 0", rawPathCount)
 	}
-	draft, err := store.SealCapture(context.Background(), SealCaptureRequest{CaptureID: capture.ID, EndCursor: "ignored"})
+	draft, err := store.SealCapture(context.Background(), SealCaptureRequest{CaptureID: capture.ID, EndCursor: sealed.EndCursor})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,13 +88,14 @@ func TestPublishEpisodeBatchesLargePathSets(t *testing.T) {
 	paths := testEpisodePaths(11_000)
 	insertTestCapturePaths(t, store, capture.ID, paths)
 	if _, err := store.SealCapture(context.Background(), SealCaptureRequest{
-		CaptureID: capture.ID, EndCursor: "end",
+		CaptureID: capture.ID, EndCursor: "end", Transcript: testTranscriptInput(),
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	episode, err := store.PublishEpisode(context.Background(), PublishEpisodeRequest{
 		CaptureID: capture.ID, L1: "Large path set", L2: "Published in bounded batches.",
+		CompactEvidence: "Large compact evidence",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +115,9 @@ func TestPublishEpisodeRetriesAreIdempotent(t *testing.T) {
 	store := openTestStore(t, t.TempDir())
 	defer store.Close()
 	capture := sealTestCaptureWithPaths(t, store, newTestGitRepository(t, ""), "retry", "file.go")
-	request := PublishEpisodeRequest{CaptureID: capture.ID, L1: "Summary", L2: "Detail"}
+	request := PublishEpisodeRequest{
+		CaptureID: capture.ID, L1: "Summary", L2: "Detail", CompactEvidence: "Evidence",
+	}
 	first, err := store.PublishEpisode(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
@@ -132,8 +133,9 @@ func TestPublishEpisodeRetriesAreIdempotent(t *testing.T) {
 	}
 
 	for _, conflicting := range []PublishEpisodeRequest{
-		{CaptureID: capture.ID, L1: "Different", L2: "Detail"},
-		{CaptureID: capture.ID, L1: "Summary", L2: "Different"},
+		{CaptureID: capture.ID, L1: "Different", L2: "Detail", CompactEvidence: "Evidence"},
+		{CaptureID: capture.ID, L1: "Summary", L2: "Different", CompactEvidence: "Evidence"},
+		{CaptureID: capture.ID, L1: "Summary", L2: "Detail", CompactEvidence: "Different"},
 	} {
 		if _, err := store.PublishEpisode(context.Background(), conflicting); !errors.Is(err, ErrConflict) {
 			t.Errorf("conflicting retry error = %v, want ErrConflict", err)
@@ -180,7 +182,7 @@ func TestPublishEpisodeRollsBackOnInsertionFailure(t *testing.T) {
 			capture := startTestCapture(t, store, newTestGitRepository(t, ""), test.name)
 			insertTestCapturePaths(t, store, capture.ID, test.paths)
 			if _, err := store.SealCapture(context.Background(), SealCaptureRequest{
-				CaptureID: capture.ID, EndCursor: "end",
+				CaptureID: capture.ID, EndCursor: "end", Transcript: testTranscriptInput(),
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -189,13 +191,13 @@ func TestPublishEpisodeRollsBackOnInsertionFailure(t *testing.T) {
 			}
 
 			_, err := store.PublishEpisode(context.Background(), PublishEpisodeRequest{
-				CaptureID: capture.ID, L1: "Summary", L2: "Detail",
+				CaptureID: capture.ID, L1: "Summary", L2: "Detail", CompactEvidence: "Evidence",
 			})
 			if err == nil {
 				t.Fatal("PublishEpisode succeeded despite injected failure")
 			}
 
-			var episodeCount, episodePathCount, capturePathCount int
+			var episodeCount, episodePathCount, capturePathCount, compactTranscriptCount int
 			if err := store.db.QueryRow("SELECT COUNT(*) FROM episodes").Scan(&episodeCount); err != nil {
 				t.Fatal(err)
 			}
@@ -207,12 +209,17 @@ func TestPublishEpisodeRollsBackOnInsertionFailure(t *testing.T) {
 			).Scan(&capturePathCount); err != nil {
 				t.Fatal(err)
 			}
+			if err := store.db.QueryRow(
+				"SELECT COUNT(*) FROM transcripts WHERE capture_id = ? AND compact_text IS NOT NULL", capture.ID,
+			).Scan(&compactTranscriptCount); err != nil {
+				t.Fatal(err)
+			}
 			got, err := store.GetCapture(context.Background(), capture.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if episodeCount != 0 || episodePathCount != 0 || capturePathCount != len(test.paths) {
-				t.Fatalf("row counts after rollback = Episodes %d, Episode paths %d, Capture paths %d", episodeCount, episodePathCount, capturePathCount)
+			if episodeCount != 0 || episodePathCount != 0 || capturePathCount != len(test.paths) || compactTranscriptCount != 0 {
+				t.Fatalf("row counts after rollback = Episodes %d, Episode paths %d, Capture paths %d, compact Transcripts %d", episodeCount, episodePathCount, capturePathCount, compactTranscriptCount)
 			}
 			if got.Status != CaptureStatusPendingSummary || got.EpisodeID != "" {
 				t.Fatalf("Capture after rollback = %#v", got)
@@ -229,21 +236,22 @@ func TestPublishEpisodeValidatesStateAndSummaries(t *testing.T) {
 	root := newTestGitRepository(t, "")
 	openCapture := startTestCapture(t, store, root, "open-publication")
 	if _, err := store.PublishEpisode(context.Background(), PublishEpisodeRequest{
-		CaptureID: openCapture.ID, L1: "Summary", L2: "Detail",
+		CaptureID: openCapture.ID, L1: "Summary", L2: "Detail", CompactEvidence: "Evidence",
 	}); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("open Capture error = %v, want ErrInvalidState", err)
 	}
 	if _, err := store.PublishEpisode(context.Background(), PublishEpisodeRequest{
-		CaptureID: "missing", L1: "Summary", L2: "Detail",
+		CaptureID: "missing", L1: "Summary", L2: "Detail", CompactEvidence: "Evidence",
 	}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing Capture error = %v, want ErrNotFound", err)
 	}
 
 	capture := sealTestCaptureWithPaths(t, store, root, "summary-validation", "file.go")
 	for _, request := range []PublishEpisodeRequest{
-		{CaptureID: capture.ID, L1: " ", L2: "Detail"},
-		{CaptureID: capture.ID, L1: "Summary", L2: "\n\t"},
-		{CaptureID: capture.ID, L1: strings.Repeat("界", maxL1Characters+1), L2: "Detail"},
+		{CaptureID: capture.ID, L1: " ", L2: "Detail", CompactEvidence: "Evidence"},
+		{CaptureID: capture.ID, L1: "Summary", L2: "\n\t", CompactEvidence: "Evidence"},
+		{CaptureID: capture.ID, L1: strings.Repeat("界", maxL1Characters+1), L2: "Detail", CompactEvidence: "Evidence"},
+		{CaptureID: capture.ID, L1: "Summary", L2: "Detail"},
 	} {
 		if _, err := store.PublishEpisode(context.Background(), request); !errors.Is(err, ErrInvalidState) {
 			t.Errorf("invalid summary error = %v, want ErrInvalidState", err)
@@ -251,9 +259,10 @@ func TestPublishEpisodeValidatesStateAndSummaries(t *testing.T) {
 	}
 
 	episode, err := store.PublishEpisode(context.Background(), PublishEpisodeRequest{
-		CaptureID: capture.ID,
-		L1:        strings.Repeat("界", maxL1Characters),
-		L2:        "Unicode boundary accepted",
+		CaptureID:       capture.ID,
+		L1:              strings.Repeat("界", maxL1Characters),
+		L2:              "Unicode boundary accepted",
+		CompactEvidence: "Evidence",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -307,7 +316,7 @@ func sealTestCaptureWithPaths(t *testing.T, store *testService, root, externalID
 		}
 	}
 	if _, err := store.SealCapture(context.Background(), SealCaptureRequest{
-		CaptureID: capture.ID, EndCursor: "end",
+		CaptureID: capture.ID, EndCursor: "end", Transcript: testTranscriptInput(),
 	}); err != nil {
 		t.Fatalf("SealCapture: %v", err)
 	}

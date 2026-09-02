@@ -270,7 +270,7 @@ func TestRepositoryResolutionAcrossShortLivedProcesses(t *testing.T) {
 	}
 }
 
-func TestConversationGetOrCreateAndTranscriptUpdate(t *testing.T) {
+func TestConversationGetOrCreateReusesStableIdentity(t *testing.T) {
 	t.Parallel()
 
 	store := openTestStore(t, t.TempDir())
@@ -281,59 +281,29 @@ func TestConversationGetOrCreateAndTranscriptUpdate(t *testing.T) {
 	}
 	key := ConversationKey{Harness: HarnessPi, ExternalID: "session-1"}
 
-	conversationID, err := store.getOrCreateConversation(context.Background(), repository.ID, key, "first.jsonl")
+	conversationID, err := store.getOrCreateConversation(context.Background(), repository.ID, key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var createdAt, firstUpdatedAt string
-	if err := store.db.QueryRow(`
-		SELECT created_at, updated_at FROM conversations WHERE id = ?`, conversationID,
-	).Scan(&createdAt, &firstUpdatedAt); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(time.Millisecond)
-
-	reusedID, err := store.getOrCreateConversation(context.Background(), repository.ID, key, "second.jsonl")
+	reusedID, err := store.getOrCreateConversation(context.Background(), repository.ID, key)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if reusedID != conversationID {
 		t.Fatalf("reused conversation ID = %q, want %q", reusedID, conversationID)
 	}
-	var transcriptRef, secondUpdatedAt string
+
+	var createdAt, updatedAt string
 	if err := store.db.QueryRow(`
-		SELECT transcript_ref, updated_at FROM conversations WHERE id = ?`, conversationID,
-	).Scan(&transcriptRef, &secondUpdatedAt); err != nil {
+		SELECT created_at, updated_at FROM conversations WHERE id = ?`, conversationID,
+	).Scan(&createdAt, &updatedAt); err != nil {
 		t.Fatal(err)
 	}
-	if transcriptRef != "second.jsonl" {
-		t.Fatalf("transcript reference = %q, want second.jsonl", transcriptRef)
-	}
-	firstTime, err := time.Parse(time.RFC3339Nano, firstUpdatedAt)
-	if err != nil {
-		t.Fatalf("parse first updated_at: %v", err)
-	}
-	secondTime, err := time.Parse(time.RFC3339Nano, secondUpdatedAt)
-	if err != nil {
-		t.Fatalf("parse second updated_at: %v", err)
-	}
-	if !secondTime.After(firstTime) {
-		t.Fatalf("updated_at did not advance: %q then %q", firstUpdatedAt, secondUpdatedAt)
+	if createdAt != updatedAt {
+		t.Fatalf("unchanged Conversation timestamps = %q/%q", createdAt, updatedAt)
 	}
 	if _, err := time.Parse(time.RFC3339Nano, createdAt); err != nil {
 		t.Fatalf("created_at is not RFC3339Nano: %v", err)
-	}
-
-	if _, err := store.getOrCreateConversation(context.Background(), repository.ID, key, ""); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.db.QueryRow(
-		"SELECT transcript_ref FROM conversations WHERE id = ?", conversationID,
-	).Scan(&transcriptRef); err != nil {
-		t.Fatal(err)
-	}
-	if transcriptRef != "second.jsonl" {
-		t.Fatalf("empty update cleared transcript reference to %q", transcriptRef)
 	}
 }
 
@@ -347,7 +317,7 @@ func TestConversationRejectsEmptyKeyFields(t *testing.T) {
 		{Harness: HarnessPi},
 	}
 	for _, key := range keys {
-		_, err := store.getOrCreateConversation(context.Background(), "repository", key, "")
+		_, err := store.getOrCreateConversation(context.Background(), "repository", key)
 		if !errors.Is(err, ErrInvalidState) {
 			t.Errorf("key %#v error = %v, want ErrInvalidState", key, err)
 		}
@@ -378,7 +348,7 @@ func TestConcurrentConversationGetOrCreate(t *testing.T) {
 	for _, store := range stores {
 		go func() {
 			<-start
-			id, err := store.getOrCreateConversation(context.Background(), repository.ID, key, "session.jsonl")
+			id, err := store.getOrCreateConversation(context.Background(), repository.ID, key)
 			results <- result{id: id, err: err}
 		}()
 	}

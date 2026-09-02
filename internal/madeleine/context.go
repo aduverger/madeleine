@@ -87,9 +87,7 @@ func (s *Service) GetEpisode(ctx context.Context, request EpisodeRequest) (Episo
 		Paths:           record.Paths,
 		L1:              record.L1,
 		L2:              record.L2,
-		TranscriptRef:   record.TranscriptRef,
-		StartCursor:     record.StartCursor,
-		EndCursor:       record.EndCursor,
+		TranscriptID:    TranscriptID(record.TranscriptID),
 		StartedAt:       record.StartedAt,
 		EndedAt:         record.EndedAt,
 	}, nil

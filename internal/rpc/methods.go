@@ -24,6 +24,7 @@ var methodHandlers = map[string]methodHandler{
 	"episode.publish":      publishEpisode,
 	"context.for_paths":    contextForPaths,
 	"episode.get":          getEpisode,
+	"transcript.get":       getTranscript,
 }
 
 func startCapture(ctx context.Context, service *madeleine.Service, params json.RawMessage) (any, error) {
@@ -102,6 +103,14 @@ func getEpisode(ctx context.Context, service *madeleine.Service, params json.Raw
 		return nil, err
 	}
 	return service.GetEpisode(ctx, request)
+}
+
+func getTranscript(ctx context.Context, service *madeleine.Service, params json.RawMessage) (any, error) {
+	var request madeleine.TranscriptRequest
+	if err := decodeParams(params, &request); err != nil {
+		return nil, err
+	}
+	return service.GetTranscript(ctx, request)
 }
 
 func decodeParams(params json.RawMessage, destination any) error {

@@ -31,13 +31,13 @@ const detail = {
   paths: ["src/a.ts", "src/b.ts"],
   l1: "Short summary",
   l2: "Longer historical brief",
-  transcript_ref: "/sessions/pi.jsonl",
+  transcript_id: "transcript-1",
   started_at: "2026-01-01T00:00:00Z",
   ended_at: "2026-01-01T00:10:00Z",
 };
 
 describe("madeleine_episode", () => {
-  it("has a strict one-field schema and renders L2 without transcript content", async () => {
+  it("has a strict one-field schema and renders L2 with its Transcript ID", async () => {
     const getEpisode = vi.fn(async () => detail);
     const tool = register({ getEpisode });
 
@@ -48,7 +48,7 @@ describe("madeleine_episode", () => {
     const result = await tool.execute("call-1", { episode_id: "episode-1" }, undefined, undefined, context());
     expect(getEpisode).toHaveBeenCalledWith("/current/repository", "episode-1", undefined);
     expect(result.content[0].text).toContain("L2:\nLonger historical brief");
-    expect(result.content[0].text).toContain("Transcript reference: /sessions/pi.jsonl");
+    expect(result.content[0].text).toContain("Transcript ID: transcript-1");
     expect(result.content[0].text).not.toContain("transcript body");
   });
 

@@ -1,5 +1,4 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { PiState, stateEntryType, type PersistedState } from "./state.ts";
@@ -12,7 +11,11 @@ interface CustomEntry {
   data: unknown;
 }
 
-function harness(sessionFile?: string, initialEntries: CustomEntry[] = []) {
+function harness(
+  sessionFile?: string,
+  initialEntries: CustomEntry[] = [],
+  sessionID = "018f0000-0000-7000-8000-000000000099",
+) {
   const entries = [...initialEntries];
   let leaf = entries.at(-1)?.id ?? null;
   const pi = {
@@ -25,6 +28,7 @@ function harness(sessionFile?: string, initialEntries: CustomEntry[] = []) {
   const ctx = {
     sessionManager: {
       getSessionFile: () => sessionFile,
+      getSessionId: () => sessionID,
       getLeafId: () => leaf,
       getBranch: () => entries,
     },
@@ -37,27 +41,26 @@ function entry(id: string, data: unknown): CustomEntry {
 }
 
 describe("PiState", () => {
-  it("uses the cleaned session path for persisted Conversation identity", () => {
-    const { pi, ctx } = harness("relative/session.jsonl");
+  it("uses Pi's persisted session UUID for Conversation identity", () => {
+    const sessionID = "018f0000-0000-7000-8000-000000000123";
+    const { pi, ctx } = harness("relative/session.jsonl", [], sessionID);
     const state = new PiState(pi);
 
-    expect(state.initialize(ctx, "startup")).toEqual({
-      externalID: resolve("relative/session.jsonl"),
-      transcriptRef: resolve("relative/session.jsonl"),
-    });
+    expect(state.initialize(ctx, "startup")).toEqual({ externalID: sessionID });
   });
 
   it("restores only the newest valid state for the current Conversation", () => {
-    const sessionFile = resolve("session.jsonl");
+    const sessionFile = "/sessions/session.jsonl";
+    const sessionID = "018f0000-0000-7000-8000-000000000123";
     const older: PersistedState = {
       version: 1,
-      conversation_id: sessionFile,
+      conversation_id: sessionID,
       capture_id: "capture-old",
       injected_paths: ["b.ts"],
     };
     const newest: PersistedState = {
       version: 1,
-      conversation_id: sessionFile,
+      conversation_id: sessionID,
       capture_id: "capture-new",
       injected_paths: ["b.ts", "a.ts", "a.ts"],
     };
@@ -66,7 +69,7 @@ describe("PiState", () => {
       entry("two", { version: 2 }),
       entry("three", { ...newest, conversation_id: "another-session" }),
       entry("four", newest),
-    ]);
+    ], sessionID);
     const state = new PiState(pi);
 
     state.initialize(ctx, "startup");
@@ -82,16 +85,17 @@ describe("PiState", () => {
   });
 
   it("does not inherit Capture state into a new or forked Conversation", () => {
-    const sessionFile = resolve("session.jsonl");
+    const sessionFile = "/sessions/session.jsonl";
+    const sessionID = "018f0000-0000-7000-8000-000000000123";
     const persisted: PersistedState = {
       version: 1,
-      conversation_id: sessionFile,
+      conversation_id: sessionID,
       capture_id: "capture-old",
       injected_paths: ["a.ts"],
     };
 
     for (const reason of ["new", "fork"] as const) {
-      const { pi, ctx } = harness(sessionFile, [entry("one", persisted)]);
+      const { pi, ctx } = harness(sessionFile, [entry("one", persisted)], sessionID);
       const state = new PiState(pi);
       state.initialize(ctx, reason);
       expect(state.currentCaptureID()).toBeUndefined();
@@ -121,7 +125,6 @@ describe("PiState", () => {
     expect(identity.externalID).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     );
-    expect(identity.transcriptRef).toBe("");
   });
 
   it("creates a real Pi entry when an empty session has no leaf cursor", () => {
