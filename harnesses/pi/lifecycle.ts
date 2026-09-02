@@ -17,7 +17,6 @@ import { fileURLToPath } from "node:url";
 import {
   PendingCaptureRecovery,
   type RecoveryFinalizer,
-  type RetryResult,
 } from "./recovery.ts";
 import type { Capture, FinalizationDraft } from "./rpc.ts";
 import { extractCaptureTranscript, type TranscriptInput } from "./transcript.ts";
@@ -40,8 +39,6 @@ export interface RolloverResult {
   finalization: FinalizationOutcome;
   startedCaptureID: string;
 }
-
-export type { RetryResult } from "./recovery.ts";
 
 export type CaptureFinalizer = RecoveryFinalizer;
 
@@ -125,16 +122,6 @@ export class CaptureLifecycle {
       if (this.captureID) this.workController = new AbortController();
       throw error;
     }
-  }
-
-  async retry(captureID: string | undefined, ctx: ExtensionContext): Promise<RetryResult[]> {
-    if (!this.conversation) throw new Error("Madeleine has no active Conversation");
-    return this.recovery.retry(
-      this.repositoryRoot,
-      this.conversation.externalID,
-      captureID,
-      ctx,
-    );
   }
 
   private async start(event: SessionStartEvent, ctx: ExtensionContext): Promise<void> {

@@ -48,8 +48,8 @@ Plan 9 already establishes the open-Capture policy:
   disable write capture rather than choosing one arbitrarily.
 - [x] Do not infer or attach filesystem changes made while Pi was stopped.
 - [x] Empty open Captures remain open when reattached and are abandoned only
-  when a later clean seal or rollover confirms that they have no structured
-  paths.
+  when a later clean seal or manual capture confirms that they have no
+  structured paths.
 
 ## Background pending-summary worker
 
@@ -72,8 +72,8 @@ Plan 9 already establishes the open-Capture policy:
 
 - [x] Restart reattachment preserves the original Capture ID, start cursor,
   recorded paths, and injected-path deduplication state.
-- [x] A clean shutdown or manual rollover freezes the old Capture before a new
-  Capture starts.
+- [x] A clean shutdown or `/madeleine capture` freezes the old Capture before a
+  new Capture starts.
 - [x] Recording current writes cannot update a sealed pending Capture.
 - [x] Publishing an old pending Capture cannot change the current open Capture's
   status or raw paths.
@@ -100,7 +100,7 @@ Cover:
 - [x] `/reload` during A retains the Capture and injects each path once.
 - [x] Hard crash after a write reattaches A and preserves its original boundary
   and paths.
-- [x] `/madeleine rollover` publishes or leaves A pending, then starts B in the
+- [x] `/madeleine capture` publishes or leaves A pending, then starts B in the
   same Conversation.
 - [x] B writes while an older pending summary retries; the Captures retain
   disjoint structured path sets.
@@ -138,14 +138,14 @@ pi install npm:@aduverger/madeleine-pi@0.1.0
 - [x] Document release installation using `@v0.1.0`, noting that the tag is
   created after merge rather than by this PR.
 - [x] Document `MADELEINE_HOME`, `MADELEINE_BIN`, database locations,
-  `madeleine doctor`, all `/madeleine` commands including `rollover` and
-  `retry`, and the Episode/Transcript tools.
+  `madeleine doctor`, all `/madeleine` commands including `capture`, and the
+  Episode/Transcript tools.
 - [x] Explain what is stored: intentionally mutated paths, summaries,
   timestamps, sanitized cursor-bounded semantic Transcript entries, and the
   compact evidence for published Episodes. Original harness transcript files,
   read calls/results, and edit/write file bodies are not copied.
-- [x] Explain crash reattachment, pending-summary retry, explicit
-  retry/rollover/abandon, and how to disable or remove the Pi package.
+- [x] Explain crash reattachment, automatic pending-summary recovery, manual
+  capture/abandon, and how to disable or remove the Pi package.
 - [x] State clearly that opaque shell and filesystem changes are not attributed
   in v0.1.
 - [x] Link `design.md` and the completed plan files.
@@ -157,7 +157,7 @@ pi install npm:@aduverger/madeleine-pi@0.1.0
 - [x] Verify `go install` from a clean module cache.
 - [x] Verify `pi install` package discovery from a clean temporary Pi home.
 - [ ] Manually run Pi against a disposable Git repository through edit,
-  rollover, shutdown, read-context, L2 lookup, compact/raw Transcript lookup,
+  capture, shutdown, read-context, L2 lookup, compact/raw Transcript lookup,
   reload, and crash/resume scenarios.
 - [x] Run `git diff --check` and confirm no generated DB, npm cache, binary, or
   test repository is tracked.
@@ -168,13 +168,12 @@ pi install npm:@aduverger/madeleine-pi@0.1.0
 
 Listed least-confident first:
 
-1. Background and explicit retries share one serialized recovery queue. An
-   explicit retry may wait for the currently active automatic attempt, but
-   current path recording never uses that queue. The startup snapshot also
-   excludes the Capture that was current when recovery began, even if a
-   concurrent rollover seals it before the list query completes. If asking were
-   free, I would have asked whether explicit retry should preempt and cancel an
-   automatic attempt instead.
+1. Recovery remains automatic rather than exposing its queue as a user command.
+   Each pending Capture is attempted once per extension runtime and remains
+   pending for the next runtime after failure. Current path recording never uses
+   the recovery queue. The startup snapshot also excludes the Capture that was
+   current when recovery began, even if a concurrent manual capture seals it
+   before the list query completes.
 2. The vertical-slice suite uses a deterministic fake Pi event/session/model
    runtime but crosses the real child-process JSON boundary into a freshly
    compiled Madeleine binary, temporary Git repositories, and temporary SQLite
@@ -208,16 +207,16 @@ Listed least-confident first:
 8. Git remains in the end-to-end harness only because Repository identity is
    Git-based. Dirty-start, staged, commit, and branch-switch attribution tests
    were removed because v0.1 deliberately ignores those unstructured changes.
-9. Manual rollover is the explicit way to create multiple Episodes inside one
-   long-running Conversation. It shares finalization with shutdown rather than
-   introducing a second publication path.
+9. `/madeleine capture` is the explicit way to create multiple Episodes inside
+   one long-running Conversation. It shares finalization with shutdown rather
+   than introducing a second publication path.
 10. This recovery/MVP plan moved from Plan 11 to Plan 12. Persisted bounded
    transcripts and evidence retrieval must land first so end-to-end hardening
    validates the final evidence model rather than transcript-file references.
 
 ## MVP acceptance criteria
 
-- [ ] The complete clean-interval, rollover, read-context, L2, and bounded
+- [ ] The complete clean-interval, manual-capture, read-context, L2, and bounded
   Transcript retrieval flow works with real Pi.
 - [x] Crash/resume reattaches one open Capture and preserves its structured paths
   without blocking startup.

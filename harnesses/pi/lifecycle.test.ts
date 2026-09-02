@@ -767,12 +767,6 @@ describe("Capture lifecycle", () => {
     expect(lifecycle.currentCaptureID()).toBeUndefined();
   });
 
-  it("requires an explicit retry ID to be pending in the current Conversation", async () => {
-    const { pi, lifecycle, ctx } = setup();
-    await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
-    await expect(lifecycle.retry("capture-other", ctx)).rejects.toThrow("not pending");
-  });
-
   it("preserves the open Capture on reload shutdown", async () => {
     const { pi, client, lifecycle, ctx } = setup();
     await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);

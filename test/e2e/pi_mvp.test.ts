@@ -495,7 +495,7 @@ describe("Pi MVP with the real Madeleine binary", () => {
     }
   }, 20_000);
 
-  it("recovers multiple rollover failures oldest-first while the current Capture records independently", async () => {
+  it("recovers multiple capture failures oldest-first while the current Capture records independently", async () => {
     const test = await fixture();
     try {
       const sessionID = "018f0000-0000-7000-8000-0000000000d1";
@@ -509,11 +509,10 @@ describe("Pi MVP with the real Madeleine binary", () => {
         failingModels,
       );
       await first.start();
-      await first.command("retry");
       await first.write("src/old.ts", "oldest interval");
-      await first.command("rollover");
+      await first.command("capture");
       await first.write("src/middle.ts", "middle interval");
-      await first.command("rollover");
+      await first.command("capture");
       await first.shutdown();
       expect((await test.client.listPendingCaptures(test.repository, sessionID))
         .filter((capture) => capture.status === "pending_summary")).toHaveLength(2);

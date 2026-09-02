@@ -66,7 +66,7 @@ Pi session starts or resumes
     -> attach one open Capture, or create one
 successful edit/write
     -> persist the normalized repository path immediately
-clean shutdown, /tree, or /madeleine rollover
+clean shutdown, /tree, or /madeleine capture
     -> persist the cursor-bounded semantic Transcript and seal the Capture
     -> generate L1/L2 with Pi's active authenticated model
     -> atomically publish compact evidence and the Episode
@@ -101,18 +101,15 @@ Run these inside Pi:
 
 ```text
 /madeleine status
-/madeleine rollover
-/madeleine retry [capture-id]
+/madeleine capture
 /madeleine abandon <capture-id>
 /madeleine doctor
 ```
 
 - `status` lists open and pending Captures in the repository and marks the
   current Capture.
-- `rollover` seals the current interval and starts another Capture in the same
-  Conversation.
-- `retry` retries one pending Capture, or all pending Captures in the current
-  Conversation when no ID is supplied.
+- `capture` publishes the current work as an Episode and starts another Capture
+  interval in the same Conversation.
 - `abandon` permanently removes unfinished Capture paths and unpublished
   Transcript evidence after confirmation.
 - `doctor` checks the binary, data directory, schema, Git executable, and
@@ -138,8 +135,9 @@ A summary, model, or publication failure leaves a sealed Capture in
 background worker snapshots older pending Captures and retries them oldest-first.
 It attempts each queued Capture once per extension runtime, runs one recovery
 summary call at a time, does not block current path recording, and is cancelled
-cleanly during session shutdown. Use `/madeleine retry` for an explicit retry or
-`/madeleine abandon` to delete unfinished data.
+cleanly during session shutdown. A failed attempt remains pending for the next
+Pi runtime; `/madeleine abandon` deletes unfinished data when explicitly
+requested.
 
 ## Storage and configuration
 

@@ -3,10 +3,10 @@ import type {
   ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
 
-import type { RetryResult, RolloverResult } from "./lifecycle.ts";
+import type { RolloverResult } from "./lifecycle.ts";
 import type { Capture, DoctorCheck } from "./rpc.ts";
 
-const usage = "Usage: /madeleine status | rollover | retry [capture-id] | abandon <capture-id> | doctor";
+const usage = "Usage: /madeleine status | capture | abandon <capture-id> | doctor";
 
 interface CommandClient {
   doctor(repositoryRoot: string): Promise<DoctorCheck[]>;
@@ -18,7 +18,6 @@ interface CaptureController {
   currentCaptureID(): string | undefined;
   clearCurrentCapture(captureID: string): void;
   rollover(ctx: ExtensionCommandContext): Promise<RolloverResult>;
-  retry(captureID: string | undefined, ctx: ExtensionCommandContext): Promise<RetryResult[]>;
 }
 
 export function registerCommands(
@@ -27,19 +26,16 @@ export function registerCommands(
   captureController: CaptureController,
 ): void {
   pi.registerCommand("madeleine", {
-    description: "Show status, finalize or retry Captures, abandon unfinished work, or run doctor checks",
+    description: "Show status, capture current work, abandon unfinished work, or run doctor checks",
     handler: async (argumentsText, ctx) => {
       const argumentsList = argumentsText.trim().split(/\s+/).filter(Boolean);
       switch (argumentsList[0]) {
         case "status":
           if (argumentsList.length !== 1) return showUsage(ctx);
           return showStatus(client, captureController.currentCaptureID(), ctx);
-        case "rollover":
+        case "capture":
           if (argumentsList.length !== 1) return showUsage(ctx);
-          return rollover(captureController, ctx);
-        case "retry":
-          if (argumentsList.length > 2) return showUsage(ctx);
-          return retry(captureController, argumentsList[1], ctx);
+          return capture(captureController, ctx);
         case "abandon":
           if (argumentsList.length !== 2) return showUsage(ctx);
           return abandon(client, captureController, argumentsList[1]!, ctx);
@@ -74,7 +70,7 @@ async function showStatus(
   }
 }
 
-async function rollover(
+async function capture(
   captureController: CaptureController,
   ctx: ExtensionCommandContext,
 ): Promise<void> {
@@ -95,28 +91,7 @@ async function rollover(
     }
     ctx.ui.notify(`${outcome}\nStarted Capture ${result.startedCaptureID}.`, "info");
   } catch {
-    ctx.ui.notify("Madeleine could not roll over the current Capture.", "error");
-  }
-}
-
-async function retry(
-  captureController: CaptureController,
-  captureID: string | undefined,
-  ctx: ExtensionCommandContext,
-): Promise<void> {
-  try {
-    await ctx.waitForIdle();
-    const results = await captureController.retry(captureID, ctx);
-    if (results.length === 0) {
-      ctx.ui.notify("Madeleine has no pending Captures in this Conversation.", "info");
-      return;
-    }
-    const lines = results.map((result) => result.status === "published"
-      ? `${result.captureID}: published Episode ${result.episodeID}`
-      : `${result.captureID}: still pending`);
-    ctx.ui.notify(lines.join("\n"), results.some((result) => result.status === "failed") ? "warning" : "info");
-  } catch {
-    ctx.ui.notify("Madeleine could not retry the requested Capture.", "error");
+    ctx.ui.notify("Madeleine could not capture the current work.", "error");
   }
 }
 

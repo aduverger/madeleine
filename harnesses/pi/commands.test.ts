@@ -2,7 +2,6 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { describe, expect, it, vi } from "vitest";
 
 import { registerCommands } from "./commands.ts";
-import type { RetryResult } from "./lifecycle.ts";
 import type { Capture, DoctorCheck } from "./rpc.ts";
 
 function capture(id: string, status: Capture["status"] = "open"): Capture {
@@ -42,9 +41,6 @@ function setup(options: { captures?: Capture[]; checks?: DoctorCheck[]; confirme
       },
       startedCaptureID: "capture-next",
     })),
-    retry: vi.fn(async (): Promise<RetryResult[]> => [
-      { captureID: "capture-pending", status: "published", episodeID: "episode-pending" },
-    ]),
   };
   const notify = vi.fn();
   const confirm = vi.fn(async () => options.confirmed ?? false);
@@ -67,12 +63,14 @@ function setup(options: { captures?: Capture[]; checks?: DoctorCheck[]; confirme
 }
 
 describe("/madeleine", () => {
-  it("prints usage for missing or unknown subcommands without RPC", async () => {
+  it("prints usage for missing, unknown, and removed subcommands without RPC", async () => {
     const test = setup();
     await test.run("");
     await test.run("unknown");
+    await test.run("rollover");
+    await test.run("retry");
 
-    expect(test.notify).toHaveBeenCalledTimes(2);
+    expect(test.notify).toHaveBeenCalledTimes(4);
     expect(test.client.listPendingCaptures).not.toHaveBeenCalled();
     expect(test.client.doctor).not.toHaveBeenCalled();
   });
@@ -91,42 +89,15 @@ describe("/madeleine", () => {
     expect(test.notify.mock.calls[0]?.[0]).toContain("capture-pending  pending_summary");
   });
 
-  it("waits for idle before rolling over the current Capture", async () => {
+  it("waits for idle before capturing the current work", async () => {
     const test = setup();
-    await test.run("rollover");
+    await test.run("capture");
 
     expect(test.waitForIdle).toHaveBeenCalledOnce();
     expect(test.current.rollover).toHaveBeenCalledOnce();
     expect(test.notify).toHaveBeenCalledWith(
       "Published Episode episode-current from Capture capture-current.\nStarted Capture capture-next.",
       "info",
-    );
-  });
-
-  it("retries one pending Capture after waiting for idle", async () => {
-    const test = setup();
-    await test.run("retry capture-pending");
-
-    expect(test.waitForIdle).toHaveBeenCalledOnce();
-    expect(test.current.retry).toHaveBeenCalledWith("capture-pending", expect.anything());
-    expect(test.notify).toHaveBeenCalledWith(
-      "capture-pending: published Episode episode-pending",
-      "info",
-    );
-  });
-
-  it("retries the pending queue without an ID and reports per-Capture failures", async () => {
-    const test = setup();
-    test.current.retry.mockResolvedValueOnce([
-      { captureID: "capture-old", status: "failed" },
-      { captureID: "capture-new", status: "published", episodeID: "episode-new" },
-    ]);
-    await test.run("retry");
-
-    expect(test.current.retry).toHaveBeenCalledWith(undefined, expect.anything());
-    expect(test.notify).toHaveBeenCalledWith(
-      "capture-old: still pending\ncapture-new: published Episode episode-new",
-      "warning",
     );
   });
 

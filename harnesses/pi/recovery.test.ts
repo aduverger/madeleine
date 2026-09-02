@@ -117,30 +117,4 @@ describe("PendingCaptureRecovery", () => {
 
     expect(cleanedUp).toBe(true);
   });
-
-  it("serializes background and explicit recovery finalization", async () => {
-    const pending = [capture("old", "2026-01-01T00:00:00Z")];
-    let active = 0;
-    let maximumActive = 0;
-    const { worker, ctx } = setup(pending, async (sealed) => {
-      active++;
-      maximumActive = Math.max(maximumActive, active);
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      active--;
-      return {
-        captureID: sealed.capture_id,
-        status: "published",
-        episodeID: `episode-${sealed.capture_id}`,
-      };
-    });
-
-    worker.start("/repo", "conversation-1", "current", ctx, () => undefined);
-    const retried = worker.retry("/repo", "conversation-1", "old", ctx);
-    await expect(retried).resolves.toEqual([
-      { captureID: "old", status: "published", episodeID: "episode-old" },
-    ]);
-    await worker.stop();
-
-    expect(maximumActive).toBe(1);
-  });
 });

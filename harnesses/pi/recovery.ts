@@ -3,15 +3,6 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Capture, FinalizationDraft } from "./rpc.ts";
 import type { EpisodeFinalization } from "./summary.ts";
 
-export type RetryResult = {
-  captureID: string;
-  status: "failed";
-} | {
-  captureID: string;
-  status: "published";
-  episodeID: string;
-};
-
 export interface RecoveryFinalizer {
   finalize(
     draft: FinalizationDraft,
@@ -36,7 +27,6 @@ export interface RecoveryClient {
 
 export class PendingCaptureRecovery {
   private readonly automaticallyAttempted = new Set<string>();
-  private queue: Promise<void> = Promise.resolve();
   private backgroundController: AbortController | undefined;
   private background: Promise<void> = Promise.resolve();
 
@@ -55,7 +45,7 @@ export class PendingCaptureRecovery {
     this.backgroundController?.abort();
     const controller = new AbortController();
     this.backgroundController = controller;
-    this.background = this.enqueue(async () => {
+    const recover = async () => {
       let captures: Capture[];
       try {
         captures = (await this.pendingCaptures(repositoryRoot, externalID, controller.signal))
@@ -79,45 +69,14 @@ export class PendingCaptureRecovery {
           }
         }
       }
-    });
+    };
+    this.background = this.background.then(recover, recover);
   }
 
   async stop(): Promise<void> {
     this.backgroundController?.abort();
     this.backgroundController = undefined;
     await this.background;
-  }
-
-  retry(
-    repositoryRoot: string,
-    externalID: string,
-    captureID: string | undefined,
-    ctx: ExtensionContext,
-  ): Promise<RetryResult[]> {
-    return this.enqueue(async () => {
-      const pending = await this.pendingCaptures(repositoryRoot, externalID, ctx.signal);
-      const captures = captureID
-        ? pending.filter((capture) => capture.id === captureID)
-        : pending;
-      if (captureID && captures.length === 0) {
-        throw new Error("Capture is not pending in the current Conversation");
-      }
-
-      const results: RetryResult[] = [];
-      for (const capture of captures) {
-        try {
-          const finalization = await this.finalizeCapture(capture, ctx, ctx.signal);
-          results.push({
-            captureID: capture.id,
-            status: "published",
-            episodeID: finalization.episodeID,
-          });
-        } catch {
-          results.push({ captureID: capture.id, status: "failed" });
-        }
-      }
-      return results;
-    });
   }
 
   private async pendingCaptures(
@@ -144,11 +103,5 @@ export class PendingCaptureRecovery {
       throw new Error("Pending Capture was unexpectedly abandoned");
     }
     return finalization;
-  }
-
-  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.queue.then(operation, operation);
-    this.queue = result.then(() => undefined, () => undefined);
-    return result;
   }
 }
