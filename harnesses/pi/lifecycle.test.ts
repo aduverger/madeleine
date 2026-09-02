@@ -287,7 +287,7 @@ describe("Capture lifecycle", () => {
       const { pi, client, lifecycle, ctx } = setup();
       await pi.emit("session_start", { type: "session_start", reason }, ctx);
 
-      expect(client.calls.map((call) => call.method)).toEqual(["list", "start"]);
+      expect(client.calls.map((call) => call.method)).toEqual(["list", "start", "list"]);
       expect(lifecycle.currentCaptureID()).toBe("capture-1");
     },
   );
@@ -313,15 +313,14 @@ describe("Capture lifecycle", () => {
 
       await pi.emit("session_start", { type: "session_start", reason }, ctx);
 
-      expect(client.calls.map((call) => call.method)).toEqual(["get"]);
+      expect(client.calls.map((call) => call.method)).toEqual(["list", "list"]);
       expect(lifecycle.currentCaptureID()).toBe("capture-existing");
     },
   );
 
-  it("preserves injected paths when fallback confirms the persisted Capture", async () => {
+  it("preserves injected paths when the canonical query confirms the persisted Capture", async () => {
     const { pi, client, state, lifecycle, ctx, externalID } = setup();
     client.captures.push(captureRecord("capture-existing", externalID));
-    client.fail.add("get");
     pi.entries.push({
       type: "custom",
       id: "state-existing",
@@ -338,7 +337,7 @@ describe("Capture lifecycle", () => {
 
     await pi.emit("session_start", { type: "session_start", reason: "reload" }, ctx);
 
-    expect(client.calls.map((call) => call.method)).toEqual(["list"]);
+    expect(client.calls.map((call) => call.method)).toEqual(["list", "list"]);
     expect(lifecycle.currentCaptureID()).toBe("capture-existing");
     expect(state.claimPath("src/a.ts")).toBe(false);
     expect(pi.entries).toHaveLength(2);
@@ -352,11 +351,43 @@ describe("Capture lifecycle", () => {
 
       await pi.emit("session_start", { type: "session_start", reason }, ctx);
 
-      expect(client.calls.map((call) => call.method)).toEqual(["list"]);
+      expect(client.calls.map((call) => call.method)).toEqual(["list", "list"]);
       expect(lifecycle.currentCaptureID()).toBe("capture-existing");
       expect(pi.entries.at(-1)?.data.capture_id).toBe("capture-existing");
     },
   );
+
+  it("disables write capture when storage reports multiple open Captures", async () => {
+    const { pi, client, lifecycle, ctx, notify, externalID } = setup();
+    client.captures.push(
+      captureRecord("capture-one", externalID),
+      captureRecord("capture-two", externalID),
+    );
+    pi.entries.push({
+      type: "custom",
+      id: "state-existing",
+      parentId: "leaf-1",
+      customType: stateEntryType,
+      data: {
+        version: 1,
+        conversation_id: externalID,
+        capture_id: "capture-one",
+        injected_paths: [],
+      },
+    });
+    pi.leaf = "state-existing";
+
+    await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
+    await pi.emit("tool_result", mutation("write", "src/a.ts"), ctx);
+
+    expect(lifecycle.currentCaptureID()).toBeUndefined();
+    expect(client.calls.some((call) => call.method === "start")).toBe(false);
+    expect(client.calls.some((call) => call.method === "record")).toBe(false);
+    expect(notify).toHaveBeenCalledWith(
+      "Madeleine found multiple open Captures; write capture is disabled.",
+      "warning",
+    );
+  });
 
   it.each(["quit", "new", "resume", "fork"] as const)(
     "seals on session_shutdown: %s",
@@ -438,7 +469,7 @@ describe("Capture lifecycle", () => {
       startedCaptureID: "capture-2",
     });
     expect(client.calls.map((call) => call.method)).toEqual([
-      "list", "start", "get", "seal", "transcript", "start",
+      "list", "start", "list", "get", "seal", "transcript", "start",
     ]);
     expect(client.captures[1]?.conversation_key.external_id).toBe(externalID);
     expect(lifecycle.currentCaptureID()).toBe("capture-2");
@@ -648,7 +679,9 @@ describe("Capture lifecycle", () => {
       },
       startedCaptureID: "capture-2",
     });
-    expect(client.calls.map((call) => call.method)).toEqual(["list", "start", "get", "seal", "start"]);
+    expect(client.calls.map((call) => call.method)).toEqual([
+      "list", "start", "list", "get", "seal", "start",
+    ]);
   });
 
   it("keeps the Capture open when bounded projection fails before sealing", async () => {
@@ -688,12 +721,20 @@ describe("Capture lifecycle", () => {
     expect(client.calls.filter((call) => call.method === "start")).toHaveLength(2);
   });
 
-  it("retries pending Captures oldest-first and continues after failure", async () => {
-    const attempted: string[] = [];
+  it("records current writes while background recovery is active and stops recovery before shutdown", async () => {
+    let oldRecoveryStarted = false;
+    let oldRecoveryCleanedUp = false;
     const finalizer: CaptureFinalizer = {
-      async finalize(sealed) {
-        attempted.push(sealed.capture_id);
-        if (sealed.capture_id === "capture-old") throw new Error("summary failed");
+      async finalize(sealed, _ctx, signal) {
+        if (sealed.capture_id === "capture-old") {
+          oldRecoveryStarted = true;
+          await new Promise<void>((resolvePromise) => {
+            if (signal?.aborted) return resolvePromise();
+            signal?.addEventListener("abort", () => resolvePromise(), { once: true });
+          });
+          oldRecoveryCleanedUp = true;
+          throw new Error("cancelled");
+        }
         return {
           captureID: sealed.capture_id,
           status: "published",
@@ -702,17 +743,28 @@ describe("Capture lifecycle", () => {
       },
     };
     const { pi, client, lifecycle, ctx, externalID } = setup(() => 0, finalizer);
-    client.captures.push(
-      captureRecord("capture-old", externalID, { status: "pending_summary", end_cursor: "end-old" }),
-      captureRecord("capture-new", externalID, { status: "pending_summary", end_cursor: "end-new" }),
-    );
-    await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
+    client.captures.push(captureRecord("capture-old", externalID, {
+      status: "pending_summary",
+      end_cursor: "end-old",
+      transcript_id: "transcript-old",
+    }));
 
-    await expect(lifecycle.retry(undefined, ctx)).resolves.toEqual([
-      { captureID: "capture-old", status: "failed" },
-      { captureID: "capture-new", status: "published", episodeID: "episode-capture-new" },
-    ]);
-    expect(attempted).toEqual(["capture-old", "capture-new"]);
+    await pi.emit("session_start", { type: "session_start", reason: "startup" }, ctx);
+    await vi.waitFor(() => expect(oldRecoveryStarted).toBe(true));
+    await pi.emit("tool_result", mutation("write", "src/current.ts"), ctx);
+
+    expect(client.calls).toContainEqual(expect.objectContaining({
+      method: "record",
+      captureID: "capture-1",
+      path: resolve("/repo", "src/current.ts"),
+    }));
+    expect(client.captures.find((capture) => capture.id === "capture-old")?.status)
+      .toBe("pending_summary");
+
+    await pi.emit("session_shutdown", { type: "session_shutdown", reason: "quit" }, ctx);
+
+    expect(oldRecoveryCleanedUp).toBe(true);
+    expect(lifecycle.currentCaptureID()).toBeUndefined();
   });
 
   it("requires an explicit retry ID to be pending in the current Conversation", async () => {
@@ -772,7 +824,7 @@ describe("Capture lifecycle", () => {
     await expect(write).resolves.toBeUndefined();
 
     expect(client.calls.map((call) => call.method)).toEqual([
-      "list", "start", "record", "get", "seal", "transcript",
+      "list", "start", "list", "record", "get", "seal", "transcript",
     ]);
   });
 

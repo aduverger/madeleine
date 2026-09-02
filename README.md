@@ -3,200 +3,230 @@
 </p>
 
 <p align="center">
-  <strong>Historical context for coding agents, attached to the files they explore.</strong><br>
+  <strong>Historical context for coding agents, attached to the files they explore.</strong>
 </p>
 
-Madeleine is a local-first memory layer for coding agents. When an agent reads
-or edits a file, it surfaces the past agent sessions that changed that exact
-file and the decisions that shaped it.
+Madeleine is a local-first memory layer for coding agents. When an agent reads a
+file, Madeleine retrieves Episodes from earlier agent work that intentionally
+changed that exact repository path. Navigation remains the relevance signal:
+there is no embedding search, reranker, or separate memory agent in the normal
+path.
 
-The agent already selects relevant context by navigating the repository.
-Madeleine adds history to what it is looking at instead of turning memory into
-another search problem.
+The first integration targets [Pi](https://github.com/earendil-works/pi). It
+runs a local Go application and stores all Madeleine data in SQLite; no daemon or
+network service is required.
 
-> [!NOTE]
-> Madeleine is currently in the design and implementation phase. The Pi MVP is
-> specified but not yet available as a release.
+## Install
 
-## The idea
+Development builds track the current main branch:
 
-Most agent-memory systems begin with a prompt, search a large memory collection,
-rank the results, and inject what appears relevant.
-
-Madeleine inverts that flow:
-
-```text
-agent reads src/payments/refund.go
-                ↓
-       exact repository path
-                ↓
- Episodes that previously changed the file
-                ↓
- compact historical context beside the code
+```sh
+go install github.com/aduverger/madeleine/cmd/madeleine@main
+pi install npm:@aduverger/madeleine-pi@0.1.0
 ```
 
-The file path is the retrieval key. There is no embedding search, query
-rewriting, reranker, or separate memory agent in the normal path.
+After the repository is merged and tagged, install the matching release:
 
-This is closer to extending code navigation than building a general-purpose
-memory database.
+```sh
+go install github.com/aduverger/madeleine/cmd/madeleine@v0.1.0
+pi install npm:@aduverger/madeleine-pi@0.1.0
+```
 
-## Simple primitives
+The `v0.1.0` Go tag is created after the MVP PR merges; this PR does not create
+the tag.
 
-Madeleine uses four product-domain objects:
+Run Pi inside a Git repository, then verify the installation from either the
+shell or Pi:
 
-- **Conversation** — a harness-owned thread, such as a Pi session.
-- **Capture** — durable operational state for one unfinished interval of work.
-- **Episode** — an immutable historical record produced from a finalized
+```text
+madeleine doctor
+/madeleine doctor
+```
+
+The extension requires Node.js 22.19 or newer and a configured Pi model. The Go
+binary must be available as `madeleine` on `PATH`, unless `MADELEINE_BIN` points
+to it explicitly.
+
+## How it works
+
+Madeleine has four product objects:
+
+- **Conversation** — a harness-owned thread, identified in Pi by its session
+  UUID.
+- **Capture** — recoverable state for the current interval of work.
+- **Episode** — immutable path history and L1/L2 summaries published from a
   Capture.
 - **Transcript** — immutable sanitized evidence for one non-empty sealed
-  Capture, addressed by a generated ID.
+  Capture.
 
-Their responsibilities remain separate:
+A normal interval is:
 
-| Unfinished Capture | Published Episode |
-|---|---|
-| Records what is happening now | Explains what happened and why |
-| Stores modified paths and activity timestamps | Stores exact paths, L1/L2, and a Transcript ID |
-| Mutable while work is in progress | Immutable after publication |
+```text
+Pi session starts or resumes
+    -> attach one open Capture, or create one
+successful edit/write
+    -> persist the normalized repository path immediately
+clean shutdown, /tree, or /madeleine rollover
+    -> persist the cursor-bounded semantic Transcript and seal the Capture
+    -> generate L1/L2 with Pi's active authenticated model
+    -> atomically publish compact evidence and the Episode
+later read of the same path
+    -> inject the five newest L1 summaries
+```
 
-`live` and `history` are descriptions of lifecycle state, not additional domain
-objects or storage layers.
-
-For the Pi MVP, one Capture spans work in a Pi Conversation until a clean
-session transition, process exit, or explicit `/madeleine rollover`. Hot reload
-and restart after an abrupt process exit reattach the same open Capture. This
-keeps Episodes deliberately coarse while allowing the user to create a boundary
-inside a long-running session.
+Every non-no-op `/tree` navigation creates a Capture boundary so abandoned
+branch intent remains paired with its paths. A temporary source Capture remains
+active while Pi creates an optional branch summary; failed or cancelled
+navigation therefore does not strand write capture.
 
 ## Progressive context
 
-Episode context is disclosed in layers:
+Madeleine exposes history in four levels:
 
-1. **L1** — one or two sentences, attached automatically when a file is read.
-2. **L2** — a longer brief containing goals, decisions, rationale, actions,
-   tests, and caveats; requested only when an Episode looks useful.
-3. **Compact Transcript** — the exact final evidence used to generate L1/L2,
-   after Capture-specific chunking when a session exceeds the active model's
-   context window.
-4. **Raw Transcript** — the fuller sanitized, cursor-bounded semantic entries,
-   available in pages.
+1. **L1** — one or two sentences appended automatically to a successful exact
+   path read.
+2. **L2** — a longer implementation brief retrieved with
+   `madeleine_episode`.
+3. **Compact Transcript** — the exact final evidence supplied to the successful
+   L1/L2 model call.
+4. **Raw Transcript** — fuller sanitized semantic entries retrieved in stable
+   pages with `madeleine_transcript`.
 
-Madeleine persists both Transcript views by generated ID. Their entry format is
-owned by Madeleine rather than Pi, Claude Code, Codex, or another harness. Each
-adapter translates its native transcript into the same canonical representation,
-so Episode summaries and Transcript evidence can be consumed across harnesses.
-Madeleine does not depend on or expose the original harness transcript-file path.
+The retrieval tools are repository-scoped. An Episode or Transcript from a
+different repository is not returned.
 
-The default lookup is intentionally deterministic: the five newest Episodes for
-the exact path, newest first. The model decides which history matters.
-More elaborated ranking mechanisms will be explored in the future.
+## Commands
 
-## How an Episode is created
+Run these inside Pi:
 
 ```text
-agent run starts or resumes
-    ↓
-Capture stores successful structured file mutations
-    ↓
-Capture is sealed on exit, session transition, or manual rollover
-    ↓
-sanitized semantic Transcript entries are persisted
-    ↓
-Capture evidence is chunked only when it exceeds the active model context
-    ↓
-L1 and L2 are generated from final compact evidence
-    ↓
-compact evidence and immutable Episode are published atomically
+/madeleine status
+/madeleine rollover
+/madeleine retry [capture-id]
+/madeleine abandon <capture-id>
+/madeleine doctor
 ```
 
-Persisted Capture paths make unfinished work recoverable after a crash. Reopening
-the same Conversation reattaches its open Capture. Sealed Captures whose summary
-or publication failed remain pending for retry.
+- `status` lists open and pending Captures in the repository and marks the
+  current Capture.
+- `rollover` seals the current interval and starts another Capture in the same
+  Conversation.
+- `retry` retries one pending Capture, or all pending Captures in the current
+  Conversation when no ID is supplied.
+- `abandon` permanently removes unfinished Capture paths and unpublished
+  Transcript evidence after confirmation.
+- `doctor` checks the binary, data directory, schema, Git executable, and
+  current repository.
 
-## MVP
-
-The first complete integration targets [Pi](https://github.com/earendil-works/pi).
-It will provide:
-
-- a standalone Go CLI with a versioned JSON protocol;
-- local SQLite storage in WAL mode;
-- a thin Pi TypeScript extension;
-- automatic L1 context after successful file reads;
-- explicit L2 and compact/raw Transcript retrieval through Pi tools;
-- semantic Transcript evidence without read output or edit/write file bodies;
-- immediate recording of successful `edit` and `write` operations;
-- deliberate Capture rollover within a long-running Pi session;
-- clean shutdown, hot-reload, and crash-reattachment semantics;
-- fail-open behavior so Madeleine never breaks normal agent tools;
-- macOS and Linux support.
-
-The Go binary and Pi package will be installed separately. No daemon or network
-service is required.
-
-## Reuse before rebuilding
-
-Madeleine is deliberately small, but it is not built in isolation. The
-[Entire CLI](https://github.com/entireio/cli) is the primary implementation
-reference for mechanics it has already solved, including agent lifecycles, Git
-integration, session capture, recovery, and cross-platform behavior.
-
-When Entire code or tests fit Madeleine's semantics, we prefer adapting them over
-writing another implementation. Madeleine still owns its smaller domain model
-and avoids importing unrelated architecture. Reused work keeps its required
-attribution and provenance.
-
-## Deliberate non-goals
-
-The MVP does **not** include:
-
-- embeddings, vector databases, semantic ranking, or global memory search;
-- function, symbol, range, folder, or rename-level identity;
-- unsanitized harness-file copies or bulk import of old agent histories;
-- multiplayer coordination or shared remote storage;
-- a daemon, web service, or user interface;
-- Agent Trace or Git AI interoperability;
-- exhaustive filesystem or Git change attribution for shell commands,
-  generators, formatters, or human edits.
-
-These are not rejected forever. We want to focus first on validating file-level history.
-
-## Architecture
+Pi tools:
 
 ```text
-Pi extension
-    ↓ versioned JSON over stdin/stdout
-Madeleine CLI
-    ├── private Go application and SQLite Store
-    └── system Git: repository identity
+madeleine_episode { episode_id }
+madeleine_transcript { transcript_id, view: "compact" | "raw", offset? }
 ```
 
-SQLite is the sole source of truth for the MVP. Its write pattern is small,
-append-oriented, and friendly to concurrent readers. If future same-machine
-contention is measured, a single-writer broker can be added. Shared multi-machine
-operation would use a server store such as PostgreSQL.
+## Recovery
 
-## Direction after the MVP
+An abrupt process exit leaves the current Capture open. Reopening the same
+persisted Pi Conversation reattaches that Capture with its original ID,
+Transcript boundary, recorded paths, and injected-path deduplication state.
+Madeleine does not inspect Git or infer filesystem changes made while Pi was
+stopped.
 
-Likely next steps are:
+A summary, model, or publication failure leaves a sealed Capture in
+`pending_summary`. After the current open Capture is attached or started, one
+background worker snapshots older pending Captures and retries them oldest-first.
+It attempts each queued Capture once per extension runtime, runs one recovery
+summary call at a time, does not block current path recording, and is cancelled
+cleanly during session shutdown. Use `/madeleine retry` for an explicit retry or
+`/madeleine abandon` to delete unfinished data.
 
-1. Add more harness adapters without changing the core model.
-2. Import historical sessions into bounded Transcript records.
-3. Evaluate opt-in Git or filesystem attribution if structured mutation events
-   miss context that agents demonstrably need.
-4. Derive folder history and follow Git renames when exact paths prove limiting.
-5. Add range or symbol context only for repositories where large hotspot files
-   create measurable noise.
-6. Expose active Capture activity to orchestrators for multi-agent awareness.
-7. Add Agent Trace import/export as an interoperability layer, not an internal
-   storage model.
+## Storage and configuration
 
-## Project documents
+`MADELEINE_HOME` overrides Madeleine's data directory. The SQLite database is:
 
-- [`design.md`](./docs/design.md) contains the philosophy, accepted decisions,
-  lifecycle, interfaces, MVP boundaries, and rejected alternatives.
-- [`plan1.md`](./docs/plan1.md) through [`plan12.md`](./docs/plan12.md) form the
-  stacked implementation plan, with one reviewable pull request per file.
+```text
+macOS: ~/Library/Application Support/madeleine/madeleine.db
+Linux: $XDG_DATA_HOME/madeleine/madeleine.db
+       or ~/.local/share/madeleine/madeleine.db
+```
+
+`MADELEINE_BIN` overrides Go binary discovery, for example:
+
+```sh
+MADELEINE_BIN=/absolute/path/to/madeleine pi
+```
+
+SQLite runs in WAL mode with foreign keys, a five-second busy timeout, and four
+connections. Capture and Episode paths are repository-relative, case-preserving,
+and slash-separated.
+
+## Trust and privacy
+
+Madeleine stores locally:
+
+- paths reported by successful typed `edit` and `write` results;
+- Capture, Episode, Conversation, and Repository IDs and timestamps;
+- generated L1/L2 summaries;
+- sanitized cursor-bounded `user`, `assistant`, `branch_summary`, and `mutation`
+  Transcript entries;
+- the exact compact evidence used to publish each Episode.
+
+It does **not** copy original Pi transcript files, read calls or results,
+edit/write file bodies, image or audio bodies, thinking blocks, successful tool
+result prose, or recursively injected Madeleine context. Historical content is
+rendered as untrusted reference data rather than instructions.
+
+Opaque shell commands, generators, formatters, external tools, human edits, and
+changes from other sessions are not attributed in v0.1 unless the current Pi
+session also reports a successful structured edit or write for that path. This
+favors precise causal history over exhaustive filesystem detection.
+
+## Failure behavior
+
+The Pi integration fails open. A missing binary, unavailable repository, busy or
+invalid database, malformed protocol response, missing model, invalid summary,
+timeout, or cancelled child process must not break normal Pi reads and writes.
+Recoverable Capture data remains open or pending whenever publication cannot
+complete.
+
+## Disable or remove
+
+Use `pi config` to disable the installed extension while retaining the package.
+Remove it entirely with:
+
+```sh
+pi remove npm:@aduverger/madeleine-pi
+```
+
+Removing the Pi package stops future collection but does not delete the local
+SQLite database. Delete the configured `MADELEINE_HOME` directory separately if
+you intentionally want to remove all Madeleine data.
+
+## Development
+
+```sh
+make check
+cd harnesses/pi
+npm ci
+npm run check
+```
+
+CI runs Go and Pi checks on macOS and Linux. The end-to-end suite builds the real
+`madeleine` binary, uses temporary Git repositories and SQLite homes, and drives
+a fake deterministic Pi runtime through lifecycle, recovery, retrieval, and
+failure scenarios.
+
+## Scope
+
+The v0.1 MVP intentionally excludes semantic ranking, embeddings, folder or
+symbol identity, rename tracking, Git/filesystem reconciliation, other harness
+adapters, a daemon, network sync, and multiplayer coordination. These remain
+future work rather than current product promises.
+
+See [`docs/design.md`](./docs/design.md) for accepted architecture and
+[`docs/plan1.md`](./docs/plan1.md) through
+[`docs/plan12.md`](./docs/plan12.md) for the implementation plans.
 
 ## License
 

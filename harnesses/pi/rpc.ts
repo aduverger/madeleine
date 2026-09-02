@@ -128,9 +128,11 @@ export class RPCClient {
   readonly binary: string;
   private readonly timeoutMs: number;
   private readonly maxOutputBytes: number;
+  private readonly environment: NodeJS.ProcessEnv;
 
   constructor(options: RPCClientOptions = {}) {
-    const configuredBinary = (options.env ?? process.env).MADELEINE_BIN;
+    this.environment = { ...process.env, ...options.env };
+    const configuredBinary = this.environment.MADELEINE_BIN;
     this.binary = configuredBinary?.trim() || "madeleine";
     this.timeoutMs = options.timeoutMs ?? defaultTimeoutMs;
     this.maxOutputBytes = options.maxOutputBytes ?? defaultMaxOutputBytes;
@@ -296,6 +298,7 @@ export class RPCClient {
       let child;
       try {
         child = spawn(this.binary, args, {
+          env: this.environment,
           shell: false,
           stdio: ["pipe", "pipe", "pipe"],
           windowsHide: true,

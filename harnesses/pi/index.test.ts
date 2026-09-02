@@ -223,6 +223,7 @@ describe("read enrichment", () => {
     ["lookup timeout", { result: [], delayMs: 200 }, { timeoutMs: 20 }],
     ["bad JSON", { rawStdout: "bad json" }, {}],
     ["wrong protocol", { result: [], protocolVersion: 2 }, {}],
+    ["SQLite busy", { error: { code: "database_busy", message: "database is busy" } }, {}],
     ["nonzero child", { result: [], exitCode: 1 }, {}],
   ] as const)("fails open on %s", async (_name, action, options) => {
     const { extension, ctx } = await extensionWith(action, options);

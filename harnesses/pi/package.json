@@ -12,6 +12,7 @@
     "index.ts",
     "lifecycle.ts",
     "render.ts",
+    "recovery.ts",
     "rpc.ts",
     "state.ts",
     "summary.ts",
