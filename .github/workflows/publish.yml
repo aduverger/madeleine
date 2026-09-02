@@ -1,5 +1,4 @@
 name: Publish npm package
-run-name: ${{ inputs.run_nonce }}
 
 on:
   workflow_dispatch:
@@ -13,10 +12,6 @@ on:
         description: npm dist-tag used only when dry_run is false
         required: true
         default: next
-        type: string
-      run_nonce:
-        description: Correlation nonce for this dispatch
-        required: true
         type: string
 
 permissions:

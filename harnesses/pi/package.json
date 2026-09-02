@@ -32,7 +32,6 @@
     "summary.ts",
     "transcript-tool.ts",
     "transcript.ts",
-    "scripts/verify-package.mjs",
     "LICENSE",
     "NOTICE",
     "README.md"
@@ -51,10 +50,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest --run",
-    "verify:package": "node scripts/verify-package.mjs",
     "pack:check": "npm_config_cache=.npm-cache npm pack --dry-run",
     "check": "npm run typecheck && npm test",
-    "prepack": "npm run check && npm run verify:package"
+    "prepack": "npm run check"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

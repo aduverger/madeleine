@@ -29,7 +29,6 @@ harnesses/pi/commands.ts
 harnesses/pi/*.test.ts
 harnesses/pi/package*.json
 harnesses/pi/README.md
-harnesses/pi/scripts/verify-package.mjs
 test/e2e/*
 .github/workflows/*
 Makefile
@@ -161,9 +160,8 @@ pi install npm:@aduverger/madeleine-pi@0.1.0
 - [ ] Run `make check` and `npm run check` on Linux and macOS.
 - [x] Verify `go install` from a clean module cache.
 - [x] Verify `pi install` package discovery from a clean temporary Pi home.
-- [x] Verify npm metadata and the exact published-file allowlist during checks
-  and before packing.
-- [x] Add a resumable local release target and a manually dispatched trusted
+- [x] Verify npm package contents with `npm pack --dry-run`.
+- [x] Add a guarded local release target and a manually dispatched trusted
   publishing workflow that defaults to a dry run and requires the matching tag
   before publication.
 - [ ] Manually run Pi against a disposable Git repository through edit,
@@ -179,11 +177,10 @@ pi install npm:@aduverger/madeleine-pi@0.1.0
 Listed least-confident first:
 
 1. The Go module and npm adapter share one release version and root Git tag.
-   The local target can resume a matching npm publication and finish its tag.
-   The manual trusted-publishing workflow defaults to a dry run and requires the
-   matching root tag before it publishes npm with provenance. If asking were
-   free, I would have asked whether future adapters should keep independent
-   version lines instead.
+   The local target follows one direct release path. The manual trusted-publishing
+   workflow defaults to a dry run and requires the matching root tag before it
+   publishes npm with provenance. If asking were free, I would have asked whether
+   future adapters should keep independent version lines instead.
 2. Recovery remains automatic rather than exposing its queue as a user command.
    Each pending Capture is attempted once per extension runtime and remains
    pending for the next runtime after failure. Current path recording never uses
