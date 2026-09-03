@@ -496,7 +496,7 @@ RPC methods mirror the Service operations. `madeleine doctor` is human-readable;
 The Pi adapter is a TypeScript package in the same repository:
 
 ```text
-package: @aduverger/madeleine-pi
+package: @aduverger/pi-madeleine
 runtime: Node >= 22.19.0
 root: harnesses/pi
 entry: index.ts
@@ -520,8 +520,8 @@ never through a shell.
 Installation remains deliberately separate:
 
 ```text
-go install github.com/aduverger/madeleine/cmd/madeleine@v0.1.0
-pi install npm:@aduverger/madeleine-pi@0.1.0
+go install github.com/aduverger/madeleine/cmd/madeleine@v0.1.1
+pi install npm:@aduverger/pi-madeleine@0.1.1
 ```
 
 `MADELEINE_BIN` overrides binary discovery. A missing binary disables the

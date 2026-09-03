@@ -1,4 +1,4 @@
-# @aduverger/madeleine-pi
+# @aduverger/pi-madeleine
 
 Pi adapter for [Madeleine](https://github.com/aduverger/madeleine), a local-first
 memory layer that attaches historical coding-agent context to repository paths.
@@ -9,7 +9,7 @@ Install the latest matching Madeleine application and Pi package:
 
 ```sh
 go install github.com/aduverger/madeleine/cmd/madeleine@latest
-pi install npm:@aduverger/madeleine-pi
+pi install npm:@aduverger/pi-madeleine
 ```
 
 The `madeleine` binary must be on `PATH`. Set `MADELEINE_BIN` to use another

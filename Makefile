@@ -1,4 +1,4 @@
-PACKAGE := @aduverger/madeleine-pi
+PACKAGE := @aduverger/pi-madeleine
 PI_PACKAGE_DIR := harnesses/pi
 NPM_REGISTRY ?= https://registry.npmjs.org/
 NPM_TAG ?= latest
