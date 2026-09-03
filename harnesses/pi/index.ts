@@ -8,6 +8,8 @@ import { registerCommands } from "./commands.ts";
 import { registerEpisodeTool } from "./episode-tool.ts";
 import { CaptureLifecycle, type CaptureClient, resolvePiToolPath } from "./lifecycle.ts";
 import {
+  AdapterError,
+  binaryInstallMessage,
   type DoctorCheck,
   type EpisodeDetail,
   type FileContext,
@@ -46,13 +48,17 @@ export function registerMadeleine(pi: ExtensionAPI, client: MadeleineClient = ne
   const state = new PiState(pi);
 
   const detect = async (ctx: ExtensionContext) => {
+    let disabledMessage = "Madeleine is disabled for this session.";
     try {
       enabled = doctorPassed(await client.doctor(ctx.cwd));
-    } catch {
+    } catch (error) {
       enabled = false;
+      if (error instanceof AdapterError && error.kind === "unavailable") {
+        disabledMessage = binaryInstallMessage;
+      }
     }
     if (!enabled && ctx.hasUI) {
-      ctx.ui.notify("Madeleine is disabled for this session.", "warning");
+      ctx.ui.notify(disabledMessage, "warning");
     }
   };
 

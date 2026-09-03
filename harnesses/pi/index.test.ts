@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { registerMadeleine } from "./index.ts";
-import { RPCClient } from "./rpc.ts";
+import { binaryInstallMessage, RPCClient } from "./rpc.ts";
 import {
   createFakeMadeleine,
   type FakeAction,
@@ -245,6 +245,7 @@ describe("read enrichment", () => {
 
     const [patch] = await extension.emit("tool_result", readEvent("src/a.ts"), ctx.value);
     expect(patch).toBeUndefined();
+    expect(ctx.notify).toHaveBeenCalledWith(binaryInstallMessage, "warning");
   });
 });
 
