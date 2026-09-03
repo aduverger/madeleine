@@ -136,10 +136,10 @@ Cover:
 
 ```text
 go install github.com/aduverger/madeleine/cmd/madeleine@main
-pi install npm:@aduverger/madeleine-pi@0.1.0
+pi install npm:@aduverger/pi-madeleine@0.1.1
 ```
 
-- [x] Document release installation using `@v0.1.0`, noting that the tag is
+- [x] Document release installation using `@v0.1.1`, noting that the tag is
   created after merge rather than by this PR.
 - [x] Document `MADELEINE_HOME`, `MADELEINE_BIN`, database locations,
   `madeleine doctor`, all `/madeleine` commands including `capture`, and the
@@ -240,7 +240,7 @@ Listed least-confident first:
   search/ranking or inferred filesystem attribution layer.
 - [x] The application, CLI, schema, Pi package, installation, and recovery
   behavior agree with `design.md`.
-- [ ] The repository is ready for a post-merge `v0.1.0` tag.
+- [ ] The repository is ready for a post-merge `v0.1.1` tag.
 
 ## Excluded from this PR and v0.1
 

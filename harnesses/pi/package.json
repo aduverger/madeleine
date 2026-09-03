@@ -1,6 +1,6 @@
 {
-  "name": "@aduverger/madeleine-pi",
-  "version": "0.1.0",
+  "name": "@aduverger/pi-madeleine",
+  "version": "0.1.1",
   "description": "Local-first historical context for Pi coding agents.",
   "repository": {
     "type": "git",

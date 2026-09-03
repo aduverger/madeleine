@@ -41,7 +41,7 @@ harnesses/pi/*.test.ts
 
 ## Package manifest
 
-- [x] Set package name `@aduverger/madeleine-pi`, license `Apache-2.0`, and
+- [x] Set package name `@aduverger/pi-madeleine`, license `Apache-2.0`, and
   `engines.node` to `>=22.19.0`.
 - [x] Add keyword `pi-package`.
 - [x] Declare `pi.extensions: ["./index.ts"]`.
@@ -164,7 +164,7 @@ finalization, and crash recovery.
 - Moved the Pi implementation from the previous `extensions` tree to
   `harnesses/pi/` so later Claude Code, Codex, and other harness integrations
   have explicit sibling ownership. Pi's package metadata now lives with its
-  implementation and is published independently as `@aduverger/madeleine-pi`.
+  implementation and is published independently as `@aduverger/pi-madeleine`.
 - Aligned read-path lookup with Pi's built-in normalization, including file
   URLs, and bounded L2 tool output with Pi's exported 50KB/2000-line truncation
   defaults after independent review identified exact-path misses and unbounded

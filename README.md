@@ -22,18 +22,23 @@ Development builds track the current main branch:
 
 ```sh
 go install github.com/aduverger/madeleine/cmd/madeleine@main
-pi install npm:@aduverger/madeleine-pi@0.1.0
+pi install npm:@aduverger/pi-madeleine@0.1.1
 ```
 
 After the repository is merged and tagged, install the matching release:
 
 ```sh
-go install github.com/aduverger/madeleine/cmd/madeleine@v0.1.0
-pi install npm:@aduverger/madeleine-pi@0.1.0
+go install github.com/aduverger/madeleine/cmd/madeleine@v0.1.1
+pi install npm:@aduverger/pi-madeleine@0.1.1
 ```
 
-The `v0.1.0` Go tag is created after the MVP PR merges; this PR does not create
-the tag.
+Go and npm releases use the same version; the root `vX.Y.Z` Git tag publishes
+the Go module version. If you installed the original package name, replace it:
+
+```sh
+pi remove npm:@aduverger/madeleine-pi
+pi install npm:@aduverger/pi-madeleine@0.1.1
+```
 
 Run Pi inside a Git repository, then verify the installation from either the
 shell or Pi:
@@ -194,7 +199,7 @@ Use `pi config` to disable the installed extension while retaining the package.
 Remove it entirely with:
 
 ```sh
-pi remove npm:@aduverger/madeleine-pi
+pi remove npm:@aduverger/pi-madeleine
 ```
 
 Removing the Pi package stops future collection but does not delete the local
@@ -220,7 +225,7 @@ Release the Go application and npm adapter at the same version from a clean,
 synchronized `main` branch:
 
 ```sh
-make release VERSION=0.1.0
+make release VERSION=0.1.1
 ```
 
 For a prerelease, use a non-`latest` npm tag:
@@ -230,7 +235,7 @@ make release VERSION=0.2.0-rc.1 NPM_TAG=next
 ```
 
 The release target validates Git and npm state, updates the package version when
-needed, runs all quality gates, publishes `@aduverger/madeleine-pi`, verifies the
+needed, runs all quality gates, publishes `@aduverger/pi-madeleine`, verifies the
 registry, and pushes the matching Git tag. That tag also publishes the Go module
 version.
 
