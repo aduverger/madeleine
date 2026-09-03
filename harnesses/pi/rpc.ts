@@ -6,6 +6,9 @@ const protocolVersion = 1;
 const defaultTimeoutMs = 2_000;
 const defaultMaxOutputBytes = 16 * 1024 * 1024;
 
+export const binaryInstallMessage =
+  "Madeleine binary not found. Run `go install github.com/aduverger/madeleine/cmd/madeleine@latest`, then add `$(go env GOPATH)/bin` to PATH or set `MADELEINE_BIN`.";
+
 export type AdapterErrorKind =
   | "unavailable"
   | "timeout"

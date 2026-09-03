@@ -2,7 +2,12 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { describe, expect, it, vi } from "vitest";
 
 import { registerCommands } from "./commands.ts";
-import type { Capture, DoctorCheck } from "./rpc.ts";
+import {
+  AdapterError,
+  binaryInstallMessage,
+  type Capture,
+  type DoctorCheck,
+} from "./rpc.ts";
 
 function capture(id: string, status: Capture["status"] = "open"): Capture {
   return {
@@ -87,6 +92,17 @@ describe("/madeleine", () => {
       "info",
     );
     expect(test.notify.mock.calls[0]?.[0]).toContain("capture-pending  pending_summary");
+  });
+
+  it("explains how to install a missing binary", async () => {
+    const test = setup();
+    test.client.listPendingCaptures.mockRejectedValueOnce(
+      new AdapterError("unavailable", "Madeleine is unavailable"),
+    );
+
+    await test.run("status");
+
+    expect(test.notify).toHaveBeenCalledWith(binaryInstallMessage, "error");
   });
 
   it("waits for idle before capturing the current work", async () => {

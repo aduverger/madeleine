@@ -4,7 +4,12 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 import type { RolloverResult } from "./lifecycle.ts";
-import type { Capture, DoctorCheck } from "./rpc.ts";
+import {
+  AdapterError,
+  binaryInstallMessage,
+  type Capture,
+  type DoctorCheck,
+} from "./rpc.ts";
 
 const usage = "Usage: /madeleine status | capture | abandon <capture-id> | doctor";
 
@@ -65,8 +70,11 @@ async function showStatus(
       return `${marker} ${capture.id}  ${capture.status}  ${capture.started_at}`;
     });
     ctx.ui.notify(["Madeleine Captures (* current):", ...lines].join("\n"), "info");
-  } catch {
-    ctx.ui.notify("Madeleine status is unavailable.", "error");
+  } catch (error) {
+    const message = error instanceof AdapterError && error.kind === "unavailable"
+      ? binaryInstallMessage
+      : "Madeleine status is unavailable.";
+    ctx.ui.notify(message, "error");
   }
 }
 
@@ -135,8 +143,11 @@ async function showDoctor(client: CommandClient, ctx: ExtensionCommandContext): 
       (check) => `${check.ok ? "ok" : "failed"}: ${check.name} — ${check.detail}`,
     );
     ctx.ui.notify(lines.join("\n"), checks.every((check) => check.ok) ? "info" : "warning");
-  } catch {
-    ctx.ui.notify("Madeleine doctor is unavailable.", "error");
+  } catch (error) {
+    const message = error instanceof AdapterError && error.kind === "unavailable"
+      ? binaryInstallMessage
+      : "Madeleine doctor is unavailable.";
+    ctx.ui.notify(message, "error");
   }
 }
 
